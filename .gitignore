@@ -1,0 +1,10 @@
+# Root-level generated or temporary files
+frontend/build-*/
+backend/tmp_*.php
+backend/db_repair_backup/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

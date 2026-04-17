@@ -1,0 +1,12 @@
+body {
+  margin: 0;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  background: #f4f7fb;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: 'Fira Code', Consolas, monospace;
+}
