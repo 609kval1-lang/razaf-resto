@@ -103,4 +103,55 @@ class AdminTreasuryManagementTest extends TestCase
             ->assertJsonPath('summary.accounts.mobile_money.balance', 23000)
             ->assertJsonPath('summary.accounts.cash.balance', 0);
     }
+
+    public function test_cash_history_only_lists_movements_that_touch_the_cash_account(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Sanctum::actingAs($admin);
+
+        $cashMovement = CashMovement::query()->create([
+            'direction' => 'in',
+            'status' => 'approved',
+            'movement_type' => 'sale',
+            'flow_type' => 'customer_payment',
+            'amount' => 12000,
+            'payment_method' => 'cash',
+            'destination_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Paiement client comptoir',
+            'reason' => 'Encaissement cash',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        $safeMovement = CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'employee_advance_payment',
+            'amount' => 4000,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_SAFE,
+            'description' => 'Avance employee depuis coffre',
+            'reason' => 'Avance employee',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        $cashHistory = $this->getJson('/api/admin/cash-movements');
+        $cashHistory->assertOk();
+
+        $movementIds = collect($cashHistory->json('movements'))->pluck('id');
+
+        $this->assertTrue($movementIds->contains((int) $cashMovement->id));
+        $this->assertFalse($movementIds->contains((int) $safeMovement->id));
+
+        $treasuryHistory = $this->getJson('/api/admin/treasury');
+        $treasuryHistory->assertOk();
+
+        $treasuryMovementIds = collect($treasuryHistory->json('movements'))->pluck('id');
+
+        $this->assertTrue($treasuryMovementIds->contains((int) $safeMovement->id));
+    }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\CashMovement;
+use App\Models\Customer;
 use App\Models\Menu;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -111,6 +112,186 @@ class CashierPaymentRoutingTest extends TestCase
             'flow_type' => 'customer_voucher_settlement',
             'payment_method' => 'cash',
             'destination_account' => CashMovement::ACCOUNT_CASH,
+        ]);
+    }
+
+    public function test_cashier_can_record_a_partial_payment_and_leave_the_balance_as_a_pending_voucher(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $server = User::factory()->create(['role' => 'server']);
+
+        Sanctum::actingAs($cashier);
+
+        $order = Order::query()->create([
+            'user_id' => $server->id,
+            'table_id' => null,
+            'customer_id' => null,
+            'total_amount' => 30000,
+            'status' => 'served',
+            'is_urgent' => false,
+            'bill_requested_at' => now(),
+            'occupies_table' => false,
+        ]);
+
+        $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client partage',
+        ])->assertOk();
+
+        $response = $this->postJson("/api/cashier/orders/{$order->id}/payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client partage',
+            'split_with_voucher' => true,
+            'split_immediate_amount' => 12000,
+            'split_immediate_method' => 'cash',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('amount_paid', 12000)
+            ->assertJsonPath('voucher_amount', 18000)
+            ->assertJsonPath('settlement_method', 'cash')
+            ->assertJsonPath('split_with_voucher', true);
+
+        $order->refresh();
+
+        $this->assertSame('served', $order->status);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'amount' => 12000,
+            'method' => 'cash',
+            'settlement_method' => 'cash',
+            'status' => 'completed',
+        ]);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'amount' => 18000,
+            'method' => 'bon',
+            'settlement_method' => null,
+            'status' => 'pending',
+        ]);
+        $this->assertDatabaseHas('cash_movements', [
+            'order_id' => $order->id,
+            'flow_type' => 'customer_payment',
+            'amount' => 12000,
+            'payment_method' => 'cash',
+            'destination_account' => CashMovement::ACCOUNT_CASH,
+        ]);
+    }
+
+    public function test_reprinting_a_split_bill_keeps_the_existing_pending_voucher_amount(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $server = User::factory()->create(['role' => 'server']);
+
+        Sanctum::actingAs($cashier);
+
+        $order = Order::query()->create([
+            'user_id' => $server->id,
+            'table_id' => null,
+            'customer_id' => null,
+            'total_amount' => 30000,
+            'status' => 'served',
+            'is_urgent' => false,
+            'bill_requested_at' => now(),
+            'occupies_table' => false,
+        ]);
+
+        $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client partage',
+        ])->assertOk();
+
+        $this->postJson("/api/cashier/orders/{$order->id}/payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client partage',
+            'split_with_voucher' => true,
+            'split_immediate_amount' => 12000,
+            'split_immediate_method' => 'cash',
+        ])->assertOk();
+
+        $reprintResponse = $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+            'method' => 'bon',
+            'customer_name' => 'Client partage',
+        ]);
+
+        $reprintResponse->assertOk()
+            ->assertJsonPath('amount_due', 18000);
+
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'amount' => 18000,
+            'method' => 'bon',
+            'status' => 'pending',
+        ]);
+
+        $this->assertSame(2, Payment::query()->where('order_id', $order->id)->count());
+    }
+
+    public function test_second_payment_of_split_voucher_keeps_customer_from_first_payment(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $server = User::factory()->create(['role' => 'server']);
+
+        Sanctum::actingAs($cashier);
+
+        $order = Order::query()->create([
+            'user_id' => $server->id,
+            'table_id' => null,
+            'customer_id' => null,
+            'total_amount' => 30000,
+            'status' => 'served',
+            'is_urgent' => false,
+            'bill_requested_at' => now(),
+            'occupies_table' => false,
+        ]);
+
+        $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client tranche 1',
+        ])->assertOk();
+
+        $this->postJson("/api/cashier/orders/{$order->id}/payment", [
+            'method' => 'cash',
+            'customer_name' => 'Client tranche 1',
+            'split_with_voucher' => true,
+            'split_immediate_amount' => 12000,
+            'split_immediate_method' => 'cash',
+        ])->assertOk();
+
+        $order->refresh();
+        $this->assertNotNull($order->customer_id);
+
+        $firstCustomerId = (int) $order->customer_id;
+        $otherCustomer = Customer::query()->create([
+            'name' => 'Client tranche 2',
+            'loyalty_points' => 0,
+        ]);
+
+        $response = $this->postJson("/api/cashier/orders/{$order->id}/payment", [
+            'method' => 'transfer',
+            'customer_id' => $otherCustomer->id,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('settlement_method', 'transfer')
+            ->assertJsonPath('amount_paid', 18000);
+
+        $order->refresh();
+
+        $this->assertSame($firstCustomerId, (int) $order->customer_id);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'amount' => 18000,
+            'method' => 'bon',
+            'settlement_method' => 'transfer',
+            'status' => 'completed',
+        ]);
+        $this->assertDatabaseHas('cash_movements', [
+            'order_id' => $order->id,
+            'flow_type' => 'customer_voucher_settlement',
+            'amount' => 18000,
+            'payment_method' => 'transfer',
+            'destination_account' => CashMovement::ACCOUNT_BANK,
         ]);
     }
 

@@ -527,8 +527,7 @@ class CashMovementController extends Controller
 
         $query->where(function ($builder) {
             $builder->where('source_account', CashMovement::ACCOUNT_CASH)
-                ->orWhere('destination_account', CashMovement::ACCOUNT_CASH)
-                ->orWhere('payment_method', 'cash');
+                ->orWhere('destination_account', CashMovement::ACCOUNT_CASH);
         });
     }
 

@@ -49,21 +49,13 @@ class CashierController extends Controller
                 'table:id,table_number',
                 'customer:id,name',
                 'billRequestedByUser:id,name',
+                'payments' => function ($paymentQuery) {
+                    $paymentQuery
+                        ->select($this->paymentSelectColumns())
+                        ->orderBy('payments.id');
+                },
                 'latestPayment' => function ($paymentQuery) {
-                    $paymentQuery->select([
-                        'payments.id',
-                        'payments.order_id',
-                        'payments.amount',
-                        'payments.discount_percent',
-                        'payments.discount_amount',
-                        'payments.method',
-                        'payments.settlement_method',
-                        'payments.status',
-                        'payments.reference',
-                        'payments.printed_at',
-                        'payments.encashed_at',
-                        'payments.created_at',
-                    ]);
+                    $paymentQuery->select($this->paymentSelectColumns());
                 },
             ]);
 
@@ -162,7 +154,19 @@ class CashierController extends Controller
 
                 $this->assertBillRequestExists($lockedOrder);
 
-                $customerId = $this->resolveCustomerForPayment($lockedOrder, $validated, $normalizedMethod);
+                /** @var Payment|null $payment */
+                $payment = $lockedOrder->payments()
+                    ->where('status', 'pending')
+                    ->lockForUpdate()
+                    ->latest('id')
+                    ->first();
+
+                $customerId = $this->resolveCustomerForPayment(
+                    $lockedOrder,
+                    $validated,
+                    $normalizedMethod,
+                    $this->shouldPreserveVoucherCustomer($lockedOrder, $payment)
+                );
                 if ($customerId && (int) ($lockedOrder->customer_id ?? 0) !== $customerId) {
                     $lockedOrder->customer_id = $customerId;
                 }
@@ -170,13 +174,16 @@ class CashierController extends Controller
                 $grossAmount = round((float) $lockedOrder->total_amount, 2);
                 $discountAmount = round(($grossAmount * $discountPercent) / 100, 2);
                 $finalAmount = round(max(0, $grossAmount - $discountAmount), 2);
+                $hasCompletedPayments = $lockedOrder->payments()
+                    ->where('status', 'completed')
+                    ->exists();
 
-                /** @var Payment|null $payment */
-                $payment = $lockedOrder->payments()
-                    ->where('status', 'pending')
-                    ->lockForUpdate()
-                    ->latest('id')
-                    ->first();
+                if ($payment && $hasCompletedPayments) {
+                    $discountPercent = (int) ($payment->discount_percent ?? $discountPercent);
+                    $discountAmount = round((float) ($payment->discount_amount ?? $discountAmount), 2);
+                    $finalAmount = round((float) ($payment->amount ?? $finalAmount), 2);
+                    $normalizedMethod = $this->normalizePaymentMethod((string) ($payment->method ?? $normalizedMethod));
+                }
 
                 $payload = [
                     'amount' => $finalAmount,
@@ -362,6 +369,9 @@ class CashierController extends Controller
             'discount_percent' => 'nullable|integer|min:0|max:10',
             'customer_id' => 'nullable|exists:customers,id',
             'customer_name' => 'nullable|string|max:120',
+            'split_with_voucher' => 'nullable|boolean',
+            'split_immediate_amount' => 'nullable|numeric|min:0.01',
+            'split_immediate_method' => 'nullable|in:cash,mobile_money,card,transfer,check',
         ]);
         $actorId = (int) $request->user()->id;
 
@@ -370,7 +380,17 @@ class CashierController extends Controller
         }
 
         try {
-            [$payment, $paidOrder, $grossAmount, $discountPercent, $discountAmount, $finalAmount, $actualMethod] = DB::transaction(function () use ($order, $validated, $actorId) {
+            [
+                $payment,
+                $updatedOrder,
+                $grossAmount,
+                $discountPercent,
+                $discountAmount,
+                $amountPaid,
+                $actualMethod,
+                $voucherAmount,
+                $splitWithVoucher,
+            ] = DB::transaction(function () use ($order, $validated, $actorId) {
                 /** @var Order $lockedOrder */
                 $lockedOrder = Order::query()
                     ->where('id', $order->id)
@@ -396,10 +416,17 @@ class CashierController extends Controller
 
                 $this->assertBillRequestExists($lockedOrder);
 
+                $splitWithVoucher = (bool) ($validated['split_with_voucher'] ?? false);
+                $initialMethod = $this->normalizePaymentMethod((string) ($payment->method ?? ''));
+                $customerResolutionMethod = $splitWithVoucher ? 'bon' : $this->normalizePaymentMethod(
+                    (string) ($payment->method ?? $validated['method'] ?? '')
+                );
+
                 $customerId = $this->resolveCustomerForPayment(
                     $lockedOrder,
                     $validated,
-                    $this->normalizePaymentMethod((string) ($payment->method ?? $validated['method'] ?? ''))
+                    $customerResolutionMethod,
+                    $this->shouldPreserveVoucherCustomer($lockedOrder, $payment)
                 );
                 if ($customerId && (int) ($lockedOrder->customer_id ?? 0) !== $customerId) {
                     $lockedOrder->customer_id = $customerId;
@@ -411,6 +438,114 @@ class CashierController extends Controller
                 $discountAmount = round((float) ($payment->discount_amount ?? 0), 2);
                 $finalAmount = round((float) ($payment->amount ?? 0), 2);
 
+                if ($splitWithVoucher) {
+                    if ($initialMethod === 'bon') {
+                        throw new InvalidArgumentException(
+                            'Ce bon est déjà en attente. Encaissez-le directement avec un vrai mode de paiement.'
+                        );
+                    }
+
+                    $hasCompletedPayments = $lockedOrder->payments()
+                        ->where('status', 'completed')
+                        ->exists();
+
+                    if ($hasCompletedPayments) {
+                        throw new InvalidArgumentException(
+                            'Cette commande a déjà reçu un paiement partiel. Encaissez uniquement le bon restant.'
+                        );
+                    }
+
+                    $immediateMethod = $this->normalizeImmediatePaymentMethod(
+                        (string) ($validated['split_immediate_method'] ?? ''),
+                        ''
+                    );
+                    if ($immediateMethod === '') {
+                        throw new InvalidArgumentException(
+                            'Choisissez le mode du premier paiement (cash, mobile money, virement ou cheque).'
+                        );
+                    }
+
+                    $immediateAmount = round((float) ($validated['split_immediate_amount'] ?? 0), 2);
+                    if ($immediateAmount <= 0) {
+                        throw new InvalidArgumentException('Le montant du premier paiement doit être supérieur à 0.');
+                    }
+
+                    if ($immediateAmount >= $finalAmount) {
+                        throw new InvalidArgumentException(
+                            'Le premier paiement doit être inférieur au total pour laisser un reliquat en bon client.'
+                        );
+                    }
+
+                    $voucherAmount = round($finalAmount - $immediateAmount, 2);
+                    if ($voucherAmount <= 0) {
+                        throw new InvalidArgumentException('Le reliquat en bon client doit être supérieur à 0.');
+                    }
+
+                    $completedDiscountAmount = $finalAmount > 0
+                        ? round(($discountAmount * $immediateAmount) / $finalAmount, 2)
+                        : 0.0;
+                    $voucherDiscountAmount = round(max(0, $discountAmount - $completedDiscountAmount), 2);
+
+                    $payment->amount = $immediateAmount;
+                    $payment->discount_percent = $discountPercent;
+                    $payment->discount_amount = $completedDiscountAmount;
+                    $payment->method = $immediateMethod;
+                    $payment->status = 'completed';
+                    $payment->settlement_method = $immediateMethod;
+                    $payment->reference = $validated['reference'] ?? $payment->reference;
+                    $payment->encashed_at = now();
+                    $payment->save();
+
+                    $this->recordCustomerCollection(
+                        order: $lockedOrder,
+                        payment: $payment,
+                        actorId: $actorId,
+                        actualMethod: $immediateMethod,
+                        amount: $immediateAmount,
+                        discountPercent: $discountPercent,
+                        discountAmount: $completedDiscountAmount
+                    );
+
+                    $voucherPayment = $lockedOrder->payments()->create([
+                        'amount' => $voucherAmount,
+                        'discount_percent' => $discountPercent,
+                        'discount_amount' => $voucherDiscountAmount,
+                        'method' => 'bon',
+                        'settlement_method' => null,
+                        'reference' => $validated['reference'] ?? null,
+                        'status' => 'pending',
+                        'printed_at' => $payment->printed_at ?? now(),
+                        'encashed_at' => null,
+                    ]);
+
+                    ActionLog::create([
+                        'user_id' => $actorId,
+                        'action' => 'customer_split_voucher_created',
+                        'entity_type' => 'Payment',
+                        'entity_id' => $voucherPayment->id,
+                        'changes' => [
+                            'order_id' => $lockedOrder->id,
+                            'completed_payment_id' => $payment->id,
+                            'immediate_method' => $immediateMethod,
+                            'immediate_amount' => $immediateAmount,
+                            'voucher_amount' => $voucherAmount,
+                        ],
+                        'action_at' => now(),
+                    ]);
+
+                    return [
+                        $payment->fresh(),
+                        $lockedOrder->fresh(),
+                        $grossAmount,
+                        $discountPercent,
+                        $discountAmount,
+                        $immediateAmount,
+                        $immediateMethod,
+                        $voucherAmount,
+                        true,
+                    ];
+                }
+
                 $requestedMethod = $this->normalizeImmediatePaymentMethod(
                     (string) ($validated['method'] ?? ''),
                     ''
@@ -419,7 +554,6 @@ class CashierController extends Controller
                     (string) ($payment->settlement_method ?? ''),
                     ''
                 );
-                $initialMethod = $this->normalizePaymentMethod((string) ($payment->method ?? ''));
                 $fallbackMethod = $initialMethod === 'bon'
                     ? ''
                     : $this->normalizeImmediatePaymentMethod((string) ($payment->method ?? ''), '');
@@ -445,60 +579,40 @@ class CashierController extends Controller
                 $payment->encashed_at = now();
                 $payment->save();
 
-                $movement = CashMovement::create([
-                    'direction' => 'in',
-                    'status' => 'approved',
-                    'movement_type' => 'sale',
-                    'flow_type' => (string) $payment->method === 'bon'
-                        ? 'customer_voucher_settlement'
-                        : 'customer_payment',
-                    'amount' => $finalAmount,
-                    'payment_method' => $actualMethod,
-                    'source_account' => null,
-                    'destination_account' => CashMovement::accountFromPaymentMethod($actualMethod) ?? CashMovement::ACCOUNT_CASH,
-                    'description' => "Encaissement commande #{$lockedOrder->id}",
-                    'reason' => (string) $payment->method === 'bon'
-                        ? 'Encaissement d’un bon client.'
-                        : ($discountPercent > 0
-                            ? "Encaissement avec réduction {$discountPercent}%."
-                            : 'Encaissement normal.'),
-                    'requested_by_user_id' => $actorId,
-                    'approved_by_user_id' => $actorId,
-                    'payment_id' => $payment->id,
-                    'order_id' => $lockedOrder->id,
-                    'metadata' => [
-                        'source' => 'payment',
-                        'initial_method' => $payment->method,
-                        'settlement_method' => $actualMethod,
-                        'discount_percent' => $discountPercent,
-                        'discount_amount' => $discountAmount,
-                    ],
-                    'approved_at' => now(),
-                ]);
+                $this->recordCustomerCollection(
+                    order: $lockedOrder,
+                    payment: $payment,
+                    actorId: $actorId,
+                    actualMethod: $actualMethod,
+                    amount: $finalAmount,
+                    discountPercent: $discountPercent,
+                    discountAmount: $discountAmount
+                );
 
-                ActionLog::create([
-                    'user_id' => $actorId,
-                    'action' => 'cash_payment_recorded',
-                    'entity_type' => 'CashMovement',
-                    'entity_id' => $movement->id,
-                    'changes' => [
-                        'order_id' => $lockedOrder->id,
-                        'payment_id' => $payment->id,
-                        'amount' => $finalAmount,
-                        'initial_method' => $payment->method,
-                        'settlement_method' => $actualMethod,
-                    ],
-                    'action_at' => now(),
-                ]);
+                $hasPendingPayments = $lockedOrder->payments()
+                    ->where('status', 'pending')
+                    ->exists();
 
-                $lockedOrder->status = 'paid';
-                $lockedOrder->paid_at = now();
-                $lockedOrder->occupies_table = false;
-                $lockedOrder->save();
+                if (!$hasPendingPayments) {
+                    $lockedOrder->status = 'paid';
+                    $lockedOrder->paid_at = now();
+                    $lockedOrder->occupies_table = false;
+                    $lockedOrder->save();
 
-                $this->releaseTableIfPossible($lockedOrder);
+                    $this->releaseTableIfPossible($lockedOrder);
+                }
 
-                return [$payment, $lockedOrder, $grossAmount, $discountPercent, $discountAmount, $finalAmount, $actualMethod];
+                return [
+                    $payment->fresh(),
+                    $lockedOrder->fresh(),
+                    $grossAmount,
+                    $discountPercent,
+                    $discountAmount,
+                    $finalAmount,
+                    $actualMethod,
+                    0.0,
+                    false,
+                ];
             });
         } catch (InvalidArgumentException $exception) {
             return response()->json(['error' => $exception->getMessage()], 422);
@@ -508,13 +622,17 @@ class CashierController extends Controller
 
         return response()->json([
             'payment' => $payment,
-            'order' => $paidOrder,
+            'order' => $updatedOrder,
             'amount_before_discount' => $grossAmount,
             'discount_percent' => $discountPercent,
             'discount_amount' => $discountAmount,
-            'amount_paid' => $finalAmount,
+            'amount_paid' => $amountPaid,
             'settlement_method' => $actualMethod,
-            'message' => 'Paiement encaissé avec succès.',
+            'voucher_amount' => $voucherAmount,
+            'split_with_voucher' => $splitWithVoucher,
+            'message' => $splitWithVoucher
+                ? 'Paiement partiel encaissé. Le reliquat a été placé en bon client.'
+                : 'Paiement encaissé avec succès.',
         ]);
     }
 
@@ -615,7 +733,8 @@ class CashierController extends Controller
     // Générer facture
     public function generateInvoice(Order $order)
     {
-        $payment = $order->payments()->latest('id')->first();
+        $payments = $order->payments()->orderBy('id')->get();
+        $payment = $payments->sortByDesc('id')->first();
         $canGenerate = $order->status === 'paid'
             || !empty($order->bill_requested_at)
             || $payment !== null;
@@ -631,6 +750,15 @@ class CashierController extends Controller
         $packagingQuantity = max(0, (int) ($order->packaging_quantity ?? 0));
         $packagingUnitPrice = round(max(0.0, (float) ($order->packaging_unit_price ?? 0)), 2);
         $packagingTotal = round($packagingQuantity * $packagingUnitPrice, 2);
+        $completedAmount = round((float) $payments->where('status', 'completed')->sum('amount'), 2);
+        $pendingAmount = round((float) $payments->where('status', 'pending')->sum('amount'), 2);
+        $discountPercent = (int) ($payments->max('discount_percent') ?? 0);
+        $discountAmount = round((float) $payments->sum('discount_amount'), 2);
+        $netTotal = round(max(
+            $completedAmount + $pendingAmount,
+            (float) ($payment?->amount ?? 0),
+            (float) ($order->total_amount ?? 0) - $discountAmount
+        ), 2);
 
         $invoice = [
             'order_id' => $order->id,
@@ -642,6 +770,7 @@ class CashierController extends Controller
             'packaging_total' => $packagingTotal,
             'customer' => $order->customer ? $order->customer->name : null,
             'items' => $items,
+            'payments' => $payments->values(),
             'items_subtotal' => $itemsSubtotal,
             'subtotal' => round($itemsSubtotal + $packagingTotal, 2),
             'payment' => $payment,
@@ -649,12 +778,19 @@ class CashierController extends Controller
             'created_at' => $order->created_at,
         ];
 
-        $invoice['discount_percent'] = (int) ($invoice['payment']?->discount_percent ?? 0);
-        $invoice['discount_amount'] = (float) ($invoice['payment']?->discount_amount ?? 0);
-        $invoice['total'] = (float) ($invoice['payment']?->amount ?? $order->total_amount);
+        $invoice['discount_percent'] = $discountPercent;
+        $invoice['discount_amount'] = $discountAmount;
+        $invoice['total'] = $netTotal;
+        $invoice['completed_amount'] = $completedAmount;
+        $invoice['remaining_amount'] = $pendingAmount;
         $invoice['printed_at'] = $invoice['payment']?->printed_at;
-        $invoice['encashed_at'] = $invoice['payment']?->encashed_at;
-        $invoice['payment_status'] = (string) ($invoice['payment']?->status ?? 'pending');
+        $invoice['encashed_at'] = $payments
+            ->where('status', 'completed')
+            ->sortByDesc('id')
+            ->first()?->encashed_at;
+        $invoice['payment_status'] = $pendingAmount > 0
+            ? 'pending'
+            : ((float) $completedAmount > 0 ? 'completed' : (string) ($invoice['payment']?->status ?? 'pending'));
 
         return response()->json($invoice);
     }
@@ -840,9 +976,19 @@ class CashierController extends Controller
         }
     }
 
-    private function resolveCustomerForPayment(Order $order, array $validated, string $method): ?int
+    private function resolveCustomerForPayment(
+        Order $order,
+        array $validated,
+        string $method,
+        bool $preserveExistingCustomer = false
+    ): ?int
     {
-        $customerId = !empty($validated['customer_id']) ? (int) $validated['customer_id'] : (int) ($order->customer_id ?? 0);
+        $existingCustomerId = (int) ($order->customer_id ?? 0);
+        if ($preserveExistingCustomer && $existingCustomerId > 0) {
+            return $existingCustomerId;
+        }
+
+        $customerId = !empty($validated['customer_id']) ? (int) $validated['customer_id'] : $existingCustomerId;
         if ($customerId > 0) {
             return $customerId;
         }
@@ -857,6 +1003,16 @@ class CashierController extends Controller
         }
 
         return null;
+    }
+
+    private function shouldPreserveVoucherCustomer(Order $order, ?Payment $payment): bool
+    {
+        if ((int) ($order->customer_id ?? 0) <= 0 || !$payment) {
+            return false;
+        }
+
+        return (string) ($payment->status ?? '') === 'pending'
+            && $this->normalizePaymentMethod((string) ($payment->method ?? '')) === 'bon';
     }
 
     private function findOrCreateCustomerByName(string $customerName): int
@@ -874,6 +1030,82 @@ class CashierController extends Controller
         Cache::forget(self::CUSTOMER_CACHE_KEY);
 
         return (int) $customer->id;
+    }
+
+    private function paymentSelectColumns(): array
+    {
+        return [
+            'payments.id',
+            'payments.order_id',
+            'payments.amount',
+            'payments.discount_percent',
+            'payments.discount_amount',
+            'payments.method',
+            'payments.settlement_method',
+            'payments.status',
+            'payments.reference',
+            'payments.printed_at',
+            'payments.encashed_at',
+            'payments.created_at',
+        ];
+    }
+
+    private function recordCustomerCollection(
+        Order $order,
+        Payment $payment,
+        int $actorId,
+        string $actualMethod,
+        float $amount,
+        int $discountPercent,
+        float $discountAmount
+    ): CashMovement {
+        $movement = CashMovement::create([
+            'direction' => 'in',
+            'status' => 'approved',
+            'movement_type' => 'sale',
+            'flow_type' => (string) $payment->method === 'bon'
+                ? 'customer_voucher_settlement'
+                : 'customer_payment',
+            'amount' => round($amount, 2),
+            'payment_method' => $actualMethod,
+            'source_account' => null,
+            'destination_account' => CashMovement::accountFromPaymentMethod($actualMethod) ?? CashMovement::ACCOUNT_CASH,
+            'description' => "Encaissement commande #{$order->id}",
+            'reason' => (string) $payment->method === 'bon'
+                ? 'Encaissement d’un bon client.'
+                : ($discountPercent > 0
+                    ? "Encaissement avec réduction {$discountPercent}%."
+                    : 'Encaissement normal.'),
+            'requested_by_user_id' => $actorId,
+            'approved_by_user_id' => $actorId,
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'metadata' => [
+                'source' => 'payment',
+                'initial_method' => $payment->method,
+                'settlement_method' => $actualMethod,
+                'discount_percent' => $discountPercent,
+                'discount_amount' => round($discountAmount, 2),
+            ],
+            'approved_at' => now(),
+        ]);
+
+        ActionLog::create([
+            'user_id' => $actorId,
+            'action' => 'cash_payment_recorded',
+            'entity_type' => 'CashMovement',
+            'entity_id' => $movement->id,
+            'changes' => [
+                'order_id' => $order->id,
+                'payment_id' => $payment->id,
+                'amount' => round($amount, 2),
+                'initial_method' => $payment->method,
+                'settlement_method' => $actualMethod,
+            ],
+            'action_at' => now(),
+        ]);
+
+        return $movement;
     }
 
     private function releaseTableIfPossible(Order $order): void

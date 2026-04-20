@@ -22,6 +22,8 @@ const formatCurrency = (value) => {
   })} Ar`;
 };
 
+const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
 const formatDateTime = (value) => {
   if (!value) return '-';
 
@@ -160,6 +162,42 @@ const getPackagingDetails = (orderLike) => {
 
 const getOrderLatestPayment = (order) => order?.latest_payment || order?.latestPayment || null;
 
+const getSortedPayments = (rawPayments, fallbackPayment = null) => {
+  const payments = Array.isArray(rawPayments) ? rawPayments.filter(Boolean) : [];
+  const entries = payments.length > 0
+    ? payments
+    : (fallbackPayment ? [fallbackPayment] : []);
+
+  return entries
+    .slice()
+    .sort((left, right) => Number(left?.id || 0) - Number(right?.id || 0));
+};
+
+const summarizePayments = (rawPayments, fallbackPayment = null) => {
+  const payments = getSortedPayments(rawPayments, fallbackPayment);
+  const completedPayments = payments.filter((payment) => String(payment?.status || '') === 'completed');
+  const pendingPayments = payments.filter((payment) => String(payment?.status || '') === 'pending');
+
+  return {
+    payments,
+    latestPayment: payments[payments.length - 1] || null,
+    latestCompletedPayment: completedPayments[completedPayments.length - 1] || null,
+    latestPendingPayment: pendingPayments[pendingPayments.length - 1] || null,
+    completedAmount: roundMoney(completedPayments.reduce((total, payment) => total + Number(payment?.amount || 0), 0)),
+    pendingAmount: roundMoney(pendingPayments.reduce((total, payment) => total + Number(payment?.amount || 0), 0)),
+    hasPendingPayment: pendingPayments.length > 0,
+    hasPendingVoucher: pendingPayments.some((payment) => normalizePaymentMethod(payment?.method) === 'bon'),
+  };
+};
+
+const getOrderPaymentSummary = (orderLike) => summarizePayments(orderLike?.payments, getOrderLatestPayment(orderLike));
+const hasLockedVoucherCustomer = (orderLike) => {
+  const paymentSummary = getOrderPaymentSummary(orderLike);
+  return paymentSummary.hasPendingVoucher && Number(orderLike?.customer?.id || 0) > 0;
+};
+
+const getInvoicePaymentSummary = (invoice) => summarizePayments(invoice?.payments, invoice?.payment || null);
+
 const hasOwnPaymentFormField = (form, key) => Object.prototype.hasOwnProperty.call(form || {}, key);
 
 const getResolvedVoucherCustomerId = (form, orderLike) => {
@@ -198,10 +236,10 @@ const getTargetAccountLabelForPayment = (payment) => {
 };
 
 const getPaymentWorkflowState = (order) => {
-  const payment = getOrderLatestPayment(order);
-  if (!payment) return 'to_print';
-  if (String(payment.status || '') === 'completed') return 'completed';
-  if (normalizePaymentMethod(payment.method) === 'bon') return 'voucher_pending';
+  const paymentSummary = getOrderPaymentSummary(order);
+  if (!paymentSummary.latestPayment) return 'to_print';
+  if (paymentSummary.hasPendingVoucher) return 'voucher_pending';
+  if (!paymentSummary.hasPendingPayment && paymentSummary.completedAmount > 0) return 'completed';
   return 'awaiting_collection';
 };
 
@@ -216,30 +254,39 @@ const paymentStatusLabel = (status) => {
 };
 
 const getInvoiceDocumentLabel = (invoice) => {
-  const status = String(invoice?.payment?.status || invoice?.payment_status || 'pending');
-  if (status === 'completed') return 'Facture';
-  if (normalizePaymentMethod(invoice?.payment?.method) === 'bon') return 'Bon client';
+  const paymentSummary = getInvoicePaymentSummary(invoice);
+  if (paymentSummary.hasPendingVoucher) return 'Bon client';
+  if (paymentSummary.completedAmount > 0 && !paymentSummary.hasPendingPayment) return 'Facture';
   return 'Addition';
 };
 
 const getInvoiceTotalLabel = (invoice) => {
-  return String(invoice?.payment?.status || invoice?.payment_status || 'pending') === 'completed'
-    ? 'Total encaissé'
-    : 'Total à encaisser';
+  const paymentSummary = getInvoicePaymentSummary(invoice);
+  if (paymentSummary.completedAmount > 0 && paymentSummary.pendingAmount > 0) {
+    return 'Reste à encaisser';
+  }
+
+  return paymentSummary.hasPendingPayment ? 'Total à encaisser' : 'Total encaissé';
 };
 
 const buildInvoiceHtml = (invoice) => {
-  const payment = invoice?.payment || null;
-  const paymentStatus = String(payment?.status || invoice?.payment_status || 'pending');
+  const paymentSummary = getInvoicePaymentSummary(invoice);
+  const payment = paymentSummary.latestPayment || invoice?.payment || null;
+  const paymentStatus = paymentSummary.pendingAmount > 0
+    ? 'pending'
+    : (paymentSummary.completedAmount > 0 ? 'completed' : String(payment?.status || invoice?.payment_status || 'pending'));
   const isCompleted = paymentStatus === 'completed';
-  const isVoucher = normalizePaymentMethod(payment?.method) === 'bon';
+  const isVoucher = paymentSummary.hasPendingVoucher;
   const printedAt = formatDateTime(invoice?.printed_at || payment?.printed_at || invoice?.bill_requested_at || invoice?.created_at);
-  const encashedAt = formatDateTime(invoice?.encashed_at || payment?.encashed_at);
+  const encashedAt = formatDateTime(invoice?.encashed_at || paymentSummary.latestCompletedPayment?.encashed_at || payment?.encashed_at);
   const subtotal = formatCurrency(invoice.subtotal || invoice.total);
   const itemsSubtotal = formatCurrency(invoice.items_subtotal || invoice.subtotal || invoice.total);
   const discountPercent = Number(invoice.discount_percent || 0);
   const discountAmount = formatCurrency(invoice.discount_amount || 0);
   const total = formatCurrency(invoice.total);
+  const completedAmount = formatCurrency(invoice.completed_amount ?? paymentSummary.completedAmount);
+  const remainingAmountValue = roundMoney(invoice.remaining_amount ?? paymentSummary.pendingAmount);
+  const remainingAmount = formatCurrency(remainingAmountValue);
   const invoicePackaging = getPackagingDetails(invoice);
   const tableLabel = String(invoice?.order_type || '') === 'takeaway'
     ? 'A emporter'
@@ -249,7 +296,9 @@ const buildInvoiceHtml = (invoice) => {
   const settlementMethodLabel = formatPaymentMethodLabel(payment?.settlement_method || payment?.method || '-');
   const items = Array.isArray(invoice.items) ? invoice.items : [];
   const documentLabel = isCompleted ? 'Facture' : (isVoucher ? 'Bon client' : 'Addition');
-  const totalLabel = isCompleted ? 'Total encaisse' : 'Total a encaisser';
+  const totalLabel = remainingAmountValue > 0
+    ? (paymentSummary.completedAmount > 0 ? 'Reste a encaisser' : 'Total a encaisser')
+    : 'Total encaisse';
 
   const rows = items.map((item) => {
     const menuName = item?.menu?.name || `Menu #${item.menu_id}`;
@@ -272,6 +321,21 @@ const buildInvoiceHtml = (invoice) => {
   const packagingLine = invoicePackaging.enabled
     ? `${invoicePackaging.quantity} x ${formatCurrency(invoicePackaging.unitPrice)} = ${formatCurrency(invoicePackaging.total)}`
     : 'Non';
+
+  const paymentRows = paymentSummary.payments.map((entry) => {
+    const entryStatus = String(entry?.status || '').trim();
+    const entryMethod = formatPaymentMethodLabel(entry?.settlement_method || entry?.method || '-');
+    const entryLabel = entryStatus === 'completed'
+      ? 'Encaissement'
+      : (normalizePaymentMethod(entry?.method) === 'bon' ? 'Bon client' : 'En attente');
+
+    return `
+        <div class="meta-row">
+          <span>${escapeHtml(entryLabel)}</span>
+          <strong>${escapeHtml(formatCurrency(entry?.amount || 0))} · ${escapeHtml(entryMethod)}</strong>
+        </div>
+      `;
+  }).join('');
 
   return `
       <!doctype html>
@@ -388,6 +452,7 @@ const buildInvoiceHtml = (invoice) => {
             <div class="meta-row"><span>Paiement</span><strong>${escapeHtml(methodLabel)}</strong></div>
             ${isCompleted ? `<div class="meta-row"><span>Encaissé via</span><strong>${escapeHtml(settlementMethodLabel)}</strong></div>` : ''}
             ${isCompleted ? `<div class="meta-row"><span>Date encaissement</span><strong>${escapeHtml(encashedAt)}</strong></div>` : ''}
+            ${paymentRows}
           </div>
 
           <div class="divider"></div>
@@ -403,7 +468,9 @@ const buildInvoiceHtml = (invoice) => {
             ${String(invoice?.order_type || '') === 'takeaway' ? `<div class="total-row"><span>Barquettes</span><strong>${escapeHtml(packagingLine)}</strong></div>` : ''}
             <div class="total-row"><span>Sous-total</span><strong>${escapeHtml(subtotal)}</strong></div>
             <div class="total-row"><span>Réduction</span><strong>${discountPercent}% (${escapeHtml(discountAmount)})</strong></div>
-            <div class="total-row grand-total"><span>${escapeHtml(totalLabel)}</span><strong>${escapeHtml(total)}</strong></div>
+            <div class="total-row grand-total"><span>Total commande</span><strong>${escapeHtml(total)}</strong></div>
+            ${paymentSummary.completedAmount > 0 ? `<div class="total-row"><span>Déjà encaissé</span><strong>${escapeHtml(completedAmount)}</strong></div>` : ''}
+            ${remainingAmountValue > 0 ? `<div class="total-row"><span>${escapeHtml(totalLabel)}</span><strong>${escapeHtml(remainingAmount)}</strong></div>` : ''}
           </div>
 
           <div class="divider"></div>
@@ -1025,8 +1092,13 @@ export const CashierPaymentsModule = () => {
         nextOrders.forEach((order) => {
           const latestPayment = getOrderLatestPayment(order);
           const previousForm = previous[order.id] || {};
+          const paymentSummary = getOrderPaymentSummary(order);
           const discountPercent = Math.max(0, Math.min(10, Number(latestPayment?.discount_percent ?? previousForm.discount_percent ?? 0)));
-          const computedAmount = getDiscountedAmount(order.total_amount, discountPercent);
+          const computedAmount = paymentSummary.pendingAmount > 0
+            ? paymentSummary.pendingAmount
+            : getDiscountedAmount(order.total_amount, discountPercent);
+          const hasSplitVoucher = paymentSummary.completedAmount > 0 && paymentSummary.hasPendingVoucher;
+          const isVoucherCustomerLocked = hasLockedVoucherCustomer(order);
 
           next[order.id] = {
             amount: computedAmount,
@@ -1039,6 +1111,20 @@ export const CashierPaymentsModule = () => {
               latestPayment?.settlement_method,
               normalizePaymentMethod(latestPayment?.method) === 'bon' ? '' : normalizePaymentMethod(latestPayment?.method)
             ),
+            payment_type: hasSplitVoucher
+              ? 'split_voucher'
+              : (String(previousForm.payment_type || '') === 'split_voucher' ? 'split_voucher' : 'single'),
+            split_immediate_amount: roundMoney(
+              previousForm.split_immediate_amount
+              || paymentSummary.completedAmount
+              || (computedAmount > 1 ? computedAmount / 2 : computedAmount)
+            ),
+            split_immediate_method: normalizeImmediatePaymentMethod(
+              previousForm.split_immediate_method,
+              paymentSummary.latestCompletedPayment?.settlement_method
+              || paymentSummary.latestCompletedPayment?.method
+              || 'cash'
+            ),
           };
 
           if (previousForm && typeof previousForm === 'object') {
@@ -1048,6 +1134,11 @@ export const CashierPaymentsModule = () => {
               amount: computedAmount,
               discount_percent: discountPercent,
             };
+          }
+
+          if (isVoucherCustomerLocked) {
+            next[order.id].customer_id = Number(order?.customer?.id || 0) || '';
+            next[order.id].customer_name = '';
           }
         });
 
@@ -1152,8 +1243,37 @@ export const CashierPaymentsModule = () => {
           nextForm.customer_id = '';
         }
 
+        if (key === 'payment_type') {
+          nextForm.payment_type = value === 'split_voucher' ? 'split_voucher' : 'single';
+
+          if (nextForm.payment_type === 'split_voucher') {
+            const totalAmount = roundMoney(nextForm.amount);
+            const currentSplitAmount = roundMoney(nextForm.split_immediate_amount);
+
+            if (currentSplitAmount <= 0 || currentSplitAmount >= totalAmount) {
+              const suggestedAmount = totalAmount > 1
+                ? roundMoney(totalAmount / 2)
+                : roundMoney(Math.max(totalAmount - 0.01, 0.01));
+              nextForm.split_immediate_amount = suggestedAmount;
+            }
+
+            nextForm.split_immediate_method = normalizeImmediatePaymentMethod(
+              nextForm.split_immediate_method,
+              normalizeImmediatePaymentMethod(nextForm.method, 'cash')
+            );
+          }
+        }
+
         if (key === 'settlement_method') {
           nextForm.settlement_method = normalizeImmediatePaymentMethod(value, '');
+        }
+
+        if (key === 'split_immediate_method') {
+          nextForm.split_immediate_method = normalizeImmediatePaymentMethod(value, 'cash');
+        }
+
+        if (key === 'split_immediate_amount') {
+          nextForm.split_immediate_amount = roundMoney(value);
         }
 
         return nextForm;
@@ -1168,18 +1288,34 @@ export const CashierPaymentsModule = () => {
     }
 
     const form = paymentForms[order.id] || {};
+    const paymentType = String(form.payment_type || 'single') === 'split_voucher' ? 'split_voucher' : 'single';
+    const isSplitVoucher = paymentType === 'split_voucher';
     const discountPercent = Math.max(0, Math.min(10, Number(form.discount_percent || 0)));
-    const method = normalizePaymentMethod(form.method) || 'cash';
+    const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, 'cash');
+    const splitImmediateAmount = roundMoney(form.split_immediate_amount);
+    const amountDue = roundMoney(form.amount);
+    const method = isSplitVoucher
+      ? splitImmediateMethod
+      : (normalizePaymentMethod(form.method) || 'cash');
+    const isVoucherCustomerLocked = hasLockedVoucherCustomer(order);
     const customerId = getResolvedVoucherCustomerId(form, order);
     const customerName = getResolvedVoucherCustomerName(form);
 
-    if (method === 'bon' && customerId <= 0 && customerName === '') {
+    if ((method === 'bon' || isSplitVoucher) && customerId <= 0 && customerName === '') {
       setMessage({ type: 'error', text: 'Un bon exige un client. Sélectionnez un client existant ou saisissez un nouveau client.' });
       return;
     }
 
     if (Number(form.amount || 0) <= 0) {
       setMessage({ type: 'error', text: 'Le montant doit etre superieur a 0.' });
+      return;
+    }
+
+    if (isSplitVoucher && (splitImmediateAmount <= 0 || splitImmediateAmount >= amountDue)) {
+      setMessage({
+        type: 'error',
+        text: 'Saisissez un premier paiement supérieur à 0 et inférieur au total pour garder un reliquat en bon client.',
+      });
       return;
     }
 
@@ -1192,8 +1328,8 @@ export const CashierPaymentsModule = () => {
         method,
         reference: form.reference || null,
         discount_percent: discountPercent,
-        customer_id: customerId > 0 ? customerId : null,
-        customer_name: customerId <= 0 && customerName !== '' ? customerName : null,
+        customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
+        customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
       });
 
       const invoiceResponse = await cashierAPI.generateInvoice(order.id);
@@ -1206,9 +1342,11 @@ export const CashierPaymentsModule = () => {
 
       setMessage({
         type: 'success',
-        text: method === 'bon'
+        text: isSplitVoucher
+          ? `Addition de la commande #${order.id} imprimée. Vous pouvez maintenant encaisser une partie et laisser le reste en bon client.`
+          : (method === 'bon'
           ? `Bon client de la commande #${order.id} imprimé. Encaissement à faire plus tard.`
-          : `Addition de la commande #${order.id} imprimée. Validez ensuite l’encaissement.`,
+          : `Addition de la commande #${order.id} imprimée. Validez ensuite l’encaissement.`),
       });
       await loadCustomers();
       await loadOrders({ silent: true });
@@ -1216,6 +1354,41 @@ export const CashierPaymentsModule = () => {
       setMessage({
         type: 'error',
         text: extractApiError(error, 'Echec de la préparation de l’addition.'),
+      });
+    } finally {
+      processingActionOrderIdsRef.current.delete(orderId);
+      setProcessingOrderId(null);
+    }
+  };
+
+  const reprintOrderPaymentDocument = async (order) => {
+    const orderId = Number(order?.id || 0);
+    if (!orderId || processingActionOrderIdsRef.current.has(orderId)) {
+      return;
+    }
+
+    processingActionOrderIdsRef.current.add(orderId);
+    setProcessingOrderId(order.id);
+    setMessage(null);
+
+    try {
+      const invoiceResponse = await cashierAPI.generateInvoice(order.id);
+      const invoice = invoiceResponse?.data || null;
+      const printed = printInvoiceDocument(invoice);
+
+      if (!printed) {
+        setMessage({ type: 'error', text: 'Impossible d’imprimer la facture. Vérifiez les autorisations du navigateur.' });
+        return;
+      }
+
+      setMessage({
+        type: 'success',
+        text: `${getInvoiceDocumentLabel(invoice)} de la commande #${order.id} réimprimé sans recalcul.`,
+      });
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: extractApiError(error, 'Impossible de réimprimer cette addition.'),
       });
     } finally {
       processingActionOrderIdsRef.current.delete(orderId);
@@ -1232,12 +1405,20 @@ export const CashierPaymentsModule = () => {
     const form = paymentForms[order.id] || {};
     const latestPayment = getOrderLatestPayment(order);
     const workflowState = getPaymentWorkflowState(order);
+    const paymentType = String(form.payment_type || 'single') === 'split_voucher' ? 'split_voucher' : 'single';
+    const isSplitVoucher = workflowState !== 'voucher_pending' && paymentType === 'split_voucher';
+    const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, '');
+    const splitImmediateAmount = roundMoney(form.split_immediate_amount);
+    const amountDue = roundMoney(form.amount);
     const actualMethod = workflowState === 'voucher_pending'
       ? normalizeImmediatePaymentMethod(
         form.settlement_method,
         normalizeImmediatePaymentMethod(latestPayment?.settlement_method, '')
       )
-      : (normalizePaymentMethod(form.method || latestPayment?.settlement_method || latestPayment?.method) || 'cash');
+      : (isSplitVoucher
+        ? splitImmediateMethod
+        : (normalizePaymentMethod(form.method || latestPayment?.settlement_method || latestPayment?.method) || 'cash'));
+    const isVoucherCustomerLocked = hasLockedVoucherCustomer(order);
     const customerId = getResolvedVoucherCustomerId(form, order);
     const customerName = getResolvedVoucherCustomerName(form);
     const selectedMethod = normalizePaymentMethod(form.method || latestPayment?.method);
@@ -1247,7 +1428,7 @@ export const CashierPaymentsModule = () => {
       return;
     }
 
-    if (workflowState !== 'voucher_pending' && selectedMethod === 'bon') {
+    if (workflowState !== 'voucher_pending' && !isSplitVoucher && selectedMethod === 'bon') {
       setMessage({
         type: 'error',
         text: 'Pour passer cette commande en bon client, cliquez sur "Imprimer le bon". L’encaissement se fera plus tard depuis la caisse ou la trésorerie admin.',
@@ -1255,13 +1436,26 @@ export const CashierPaymentsModule = () => {
       return;
     }
 
-    if (workflowState === 'voucher_pending' && customerId <= 0 && customerName === '') {
+    if ((workflowState === 'voucher_pending' || isSplitVoucher) && customerId <= 0 && customerName === '') {
       setMessage({ type: 'error', text: 'Sélectionnez le client du bon ou saisissez un nouveau client avant encaissement.' });
+      return;
+    }
+
+    if (isSplitVoucher && (splitImmediateAmount <= 0 || splitImmediateAmount >= amountDue)) {
+      setMessage({
+        type: 'error',
+        text: 'Le premier paiement doit être supérieur à 0 et inférieur au total pour créer un bon client sur le reliquat.',
+      });
       return;
     }
 
     if (workflowState === 'voucher_pending' && actualMethod === '') {
       setMessage({ type: 'error', text: 'Choisissez le mode d’encaissement du bon (cash, mobile money, virement ou cheque).' });
+      return;
+    }
+
+    if (isSplitVoucher && actualMethod === '') {
+      setMessage({ type: 'error', text: 'Choisissez le mode du premier paiement avant validation.' });
       return;
     }
 
@@ -1275,18 +1469,30 @@ export const CashierPaymentsModule = () => {
     setMessage(null);
 
     try {
-      await cashierAPI.processPayment(order.id, {
-        method: actualMethod,
-        reference: form.reference || null,
-        customer_id: customerId > 0 ? customerId : null,
-        customer_name: customerId <= 0 && customerName !== '' ? customerName : null,
-      });
+      await cashierAPI.processPayment(order.id, isSplitVoucher
+        ? {
+          method: actualMethod,
+          reference: form.reference || null,
+          customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
+          customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
+          split_with_voucher: true,
+          split_immediate_amount: splitImmediateAmount,
+          split_immediate_method: actualMethod,
+        }
+        : {
+          method: actualMethod,
+          reference: form.reference || null,
+          customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
+          customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
+        });
 
       setMessage({
         type: 'success',
-        text: workflowState === 'voucher_pending'
+        text: isSplitVoucher
+          ? `Paiement partiel enregistré pour la commande #${order.id}. Le reste est passé en bon client.`
+          : (workflowState === 'voucher_pending'
           ? `Bon de la commande #${order.id} encaissé avec succès.`
-          : `Encaissement de la commande #${order.id} validé.`,
+          : `Encaissement de la commande #${order.id} validé.`),
       });
       await loadCustomers();
       await loadOrders({ silent: true });
@@ -1336,7 +1542,8 @@ export const CashierPaymentsModule = () => {
   const pendingOrders = orders;
 
   const renderOrderCard = (order, { voucherSection = false } = {}) => {
-    const latestPayment = getOrderLatestPayment(order);
+    const paymentSummary = getOrderPaymentSummary(order);
+    const latestPayment = paymentSummary.latestPayment || getOrderLatestPayment(order);
     const workflowState = getPaymentWorkflowState(order);
     const form = paymentForms[order.id] || {
       amount: Number(order.total_amount || 0),
@@ -1346,6 +1553,9 @@ export const CashierPaymentsModule = () => {
       customer_id: Number(order?.customer?.id || 0) || '',
       customer_name: '',
       settlement_method: '',
+      payment_type: 'single',
+      split_immediate_amount: '',
+      split_immediate_method: 'cash',
     };
     const grossAmount = Number(order.total_amount || 0);
     const discountPercent = Math.max(0, Math.min(10, Number(form.discount_percent || 0)));
@@ -1354,6 +1564,12 @@ export const CashierPaymentsModule = () => {
     const isPrinted = workflowState !== 'to_print';
     const isVoucherPending = workflowState === 'voucher_pending';
     const isAwaitingCollection = workflowState === 'awaiting_collection';
+    const isSplitVoucher = !voucherSection && !isVoucherPending && String(form.payment_type || 'single') === 'split_voucher';
+    const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, 'cash');
+    const splitImmediateAmount = roundMoney(form.split_immediate_amount);
+    const splitRemainingAmount = roundMoney(Math.max(0, Number(form.amount || 0) - splitImmediateAmount));
+    const completedAmount = roundMoney(paymentSummary.completedAmount);
+    const pendingAmount = roundMoney(paymentSummary.pendingAmount || form.amount);
     const selectedCustomerId = getResolvedVoucherCustomerId(form, order);
     const selectedVoucherCustomer = customers.find((customer) => Number(customer.id) === selectedCustomerId) || null;
     const typedCustomerName = getResolvedVoucherCustomerName(form);
@@ -1361,18 +1577,23 @@ export const CashierPaymentsModule = () => {
     const hasRegisteredCustomer = Boolean(sanitizeCustomerName(selectedVoucherCustomer?.name || order?.customer?.name));
     const isRegisteredCustomerLocked = typedCustomerName !== '';
     const isNewCustomerLocked = selectedCustomerId > 0;
-    const showVoucherCustomerField = voucherSection || normalizePaymentMethod(form.method) === 'bon' || isVoucherPending;
+    const showVoucherCustomerField = voucherSection || normalizePaymentMethod(form.method) === 'bon' || isVoucherPending || isSplitVoucher;
+    const isVoucherCustomerLocked = showVoucherCustomerField && hasLockedVoucherCustomer(order);
     const paymentLabel = voucherSection
       ? 'Mode d\'encaissement du bon'
-      : (isVoucherPending ? 'Mode de paiement du bon' : 'Mode d\'encaissement');
-    const selectedPaymentMethod = normalizePaymentMethod(form.method) || 'cash';
+      : (isVoucherPending
+        ? 'Mode de paiement du bon'
+        : (isSplitVoucher ? 'Mode du 1er paiement' : 'Mode d\'encaissement'));
+    const selectedPaymentMethod = isSplitVoucher
+      ? splitImmediateMethod
+      : (normalizePaymentMethod(form.method) || 'cash');
     const paymentValue = voucherSection || isVoucherPending
       ? normalizeImmediatePaymentMethod(form.settlement_method, '')
       : selectedPaymentMethod;
     const accountPreviewLabel = voucherSection || isVoucherPending
       ? (paymentValue ? getTargetAccountLabelForMethod(paymentValue) : '')
       : (selectedPaymentMethod === 'bon' ? 'En attente' : getTargetAccountLabelForMethod(paymentValue));
-    const wantsVoucherIssuance = !voucherSection && !isVoucherPending && isAwaitingCollection && selectedPaymentMethod === 'bon';
+    const wantsVoucherIssuance = !voucherSection && !isVoucherPending && !isSplitVoucher && isAwaitingCollection && selectedPaymentMethod === 'bon';
     const canManageVoucherTable = voucherSection && Number(order?.table_id || 0) > 0;
 
     return (
@@ -1398,6 +1619,12 @@ export const CashierPaymentsModule = () => {
               <span>
                 Mode encaissé: {formatPaymentMethodLabel(latestPayment.settlement_method)}
                 {latestPayment?.encashed_at ? ` · ${formatDateTime(latestPayment.encashed_at)}` : ''}
+              </span>
+            ) : null}
+            {completedAmount > 0 ? (
+              <span>
+                Déjà encaissé: {formatCurrency(completedAmount)}
+                {paymentSummary.hasPendingVoucher ? ` · Reste en bon: ${formatCurrency(pendingAmount)}` : ''}
               </span>
             ) : null}
             <span>
@@ -1462,74 +1689,137 @@ export const CashierPaymentsModule = () => {
             />
           </label>
 
-          <label>
-            {paymentLabel}
-            <select
-              value={paymentValue}
-              onChange={(event) => updatePaymentField(
-                order.id,
-                voucherSection || isVoucherPending ? 'settlement_method' : 'method',
-                event.target.value
-              )}
-            >
-              {(voucherSection || isVoucherPending) ? (
-                <option value="">Choisir un mode d&apos;encaissement</option>
-              ) : null}
-              {(voucherSection || isVoucherPending ? IMMEDIATE_PAYMENT_METHOD_OPTIONS : PAYMENT_METHOD_OPTIONS).map((methodOption) => (
-                <option key={methodOption.value} value={methodOption.value}>{methodOption.label}</option>
-              ))}
-            </select>
-            <small className="staff-field-hint">
-              {accountPreviewLabel
-                ? `Compte alimenté: ${accountPreviewLabel}.`
-                : 'Choisissez le mode pour déterminer le compte à alimenter (caisse, mobile money ou banque).'}
-            </small>
-          </label>
+          {!voucherSection && !isVoucherPending ? (
+            <label>
+              Type de règlement
+              <select
+                value={isSplitVoucher ? 'split_voucher' : 'single'}
+                onChange={(event) => updatePaymentField(order.id, 'payment_type', event.target.value)}
+              >
+                <option value="single">Paiement simple</option>
+                <option value="split_voucher">Paiement en 2 fois + bon client</option>
+              </select>
+              <small className="staff-field-hint">
+                Conservez les modes actuels, ou encaissez une première partie maintenant puis passez le reste en bon client.
+              </small>
+            </label>
+          ) : null}
 
-          {showVoucherCustomerField ? (
+          {isSplitVoucher ? (
             <>
               <label>
-                Client enregistré
+                {paymentLabel}
                 <select
-                  value={selectedCustomerId > 0 ? String(selectedCustomerId) : ''}
-                  onChange={(event) => updatePaymentField(order.id, 'customer_id', event.target.value)}
-                  disabled={isRegisteredCustomerLocked}
+                  value={splitImmediateMethod}
+                  onChange={(event) => updatePaymentField(order.id, 'split_immediate_method', event.target.value)}
                 >
-                  <option value="">Sélectionner un client enregistré</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>{customer.name}</option>
+                  {IMMEDIATE_PAYMENT_METHOD_OPTIONS.map((methodOption) => (
+                    <option key={methodOption.value} value={methodOption.value}>{methodOption.label}</option>
                   ))}
                 </select>
                 <small className="staff-field-hint">
-                  {isRegisteredCustomerLocked
-                    ? 'Zone grisée tant qu’un nouveau client est saisi.'
-                    : customers.length > 0
-                    ? 'Choisissez ici un client déjà enregistré.'
-                    : 'Aucun client chargé pour le moment. Vous pouvez quand même saisir un nouveau client.'}
+                  {accountPreviewLabel
+                    ? `Compte alimenté maintenant: ${accountPreviewLabel}.`
+                    : 'Choisissez le mode du premier paiement.'}
                 </small>
               </label>
 
               <label>
-                Nouveau client
+                Montant encaissé maintenant
                 <input
-                  type="text"
-                  value={form.customer_name || ''}
-                  onChange={(event) => updatePaymentField(order.id, 'customer_name', event.target.value)}
-                  placeholder="Nom du nouveau client"
-                  disabled={isNewCustomerLocked}
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={form.split_immediate_amount}
+                  onChange={(event) => updatePaymentField(order.id, 'split_immediate_amount', event.target.value)}
                 />
                 <small className="staff-field-hint">
-                  {isNewCustomerLocked
-                    ? 'Zone grisée tant qu’un client enregistré est sélectionné.'
-                    : 'Si vous saisissez un nom ici, le client sera créé automatiquement pour ce bon.'}
+                  Reste en bon client: {formatCurrency(splitRemainingAmount)}.
                 </small>
               </label>
+            </>
+          ) : (
+            <label>
+              {paymentLabel}
+              <select
+                value={paymentValue}
+                onChange={(event) => updatePaymentField(
+                  order.id,
+                  voucherSection || isVoucherPending ? 'settlement_method' : 'method',
+                  event.target.value
+                )}
+              >
+                {(voucherSection || isVoucherPending) ? (
+                  <option value="">Choisir un mode d&apos;encaissement</option>
+                ) : null}
+                {(voucherSection || isVoucherPending ? IMMEDIATE_PAYMENT_METHOD_OPTIONS : PAYMENT_METHOD_OPTIONS).map((methodOption) => (
+                  <option key={methodOption.value} value={methodOption.value}>{methodOption.label}</option>
+                ))}
+              </select>
+              <small className="staff-field-hint">
+                {accountPreviewLabel
+                  ? `Compte alimenté: ${accountPreviewLabel}.`
+                  : 'Choisissez le mode pour déterminer le compte à alimenter (caisse, mobile money ou banque).'}
+              </small>
+            </label>
+          )}
 
-              {!hasRegisteredCustomer && !typedCustomerName ? (
+          {showVoucherCustomerField ? (
+            <>
+              {isVoucherCustomerLocked ? (
                 <div className="staff-field-hint staff-payment-form-note">
-                  Renseignez un client enregistré ou créez un nouveau client avant l’émission du bon.
+                  {displayedCustomerName
+                    ? (completedAmount > 0
+                      ? `Client verrouillé sur le reliquat: ${displayedCustomerName}. Le 2e paiement restera rattaché au client de la 1re tranche.`
+                      : `Client verrouillé sur ce bon: ${displayedCustomerName}. L'encaissement restera rattaché à ce client.`)
+                    : 'Client déjà verrouillé sur ce bon.'}
                 </div>
-              ) : null}
+              ) : (
+                <>
+                  <label>
+                    Client enregistré
+                    <select
+                      value={selectedCustomerId > 0 ? String(selectedCustomerId) : ''}
+                      onChange={(event) => updatePaymentField(order.id, 'customer_id', event.target.value)}
+                      disabled={isRegisteredCustomerLocked}
+                    >
+                      <option value="">Sélectionner un client enregistré</option>
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>{customer.name}</option>
+                      ))}
+                    </select>
+                    <small className="staff-field-hint">
+                      {isRegisteredCustomerLocked
+                        ? 'Zone grisée tant qu’un nouveau client est saisi.'
+                        : customers.length > 0
+                        ? 'Choisissez ici un client déjà enregistré.'
+                        : 'Aucun client chargé pour le moment. Vous pouvez quand même saisir un nouveau client.'}
+                    </small>
+                  </label>
+
+                  <label>
+                    Nouveau client
+                    <input
+                      type="text"
+                      value={form.customer_name || ''}
+                      onChange={(event) => updatePaymentField(order.id, 'customer_name', event.target.value)}
+                      placeholder="Nom du nouveau client"
+                      disabled={isNewCustomerLocked}
+                    />
+                    <small className="staff-field-hint">
+                      {isNewCustomerLocked
+                        ? 'Zone grisée tant qu’un client enregistré est sélectionné.'
+                        : 'Si vous saisissez un nom ici, le client sera créé automatiquement pour ce bon.'}
+                    </small>
+                  </label>
+
+                  {!hasRegisteredCustomer && !typedCustomerName ? (
+                    <div className="staff-field-hint staff-payment-form-note">
+                      Renseignez un client enregistré ou créez un nouveau client avant l’émission du bon.
+                    </div>
+                  ) : null}
+                </>
+              )}
             </>
           ) : null}
         </div>
@@ -1578,7 +1868,7 @@ export const CashierPaymentsModule = () => {
                 type="button"
                 className="staff-btn secondary"
                 disabled={processingOrderId === order.id}
-                onClick={() => prepareOrderPayment(order)}
+                onClick={() => reprintOrderPaymentDocument(order)}
               >
                 {processingOrderId === order.id
                   ? 'Traitement...'
@@ -1605,6 +1895,12 @@ export const CashierPaymentsModule = () => {
           {wantsVoucherIssuance ? (
             <div className="staff-field-hint staff-payment-form-note">
               Le bon client sera imprimé et restera en attente d&apos;encaissement jusqu&apos;à validation par la caisse ou l&apos;admin.
+            </div>
+          ) : null}
+
+          {isSplitVoucher ? (
+            <div className="staff-field-hint staff-payment-form-note">
+              La validation encaissera le premier montant tout de suite, puis créera automatiquement un bon client pour le reliquat.
             </div>
           ) : null}
         </footer>
@@ -1753,6 +2049,8 @@ export const CashierHistoryModule = () => {
     });
   };
 
+  const selectedInvoicePaymentSummary = selectedInvoice ? getInvoicePaymentSummary(selectedInvoice) : null;
+
   if (loading) {
     return <div className="staff-card">Chargement de l'historique...</div>;
   }
@@ -1824,7 +2122,7 @@ export const CashierHistoryModule = () => {
                     <td data-label="Date encaissement">{formatDateTime(payment.encashed_at)}</td>
                     <td data-label="Action">
                       <button type="button" className="staff-btn secondary" onClick={() => loadInvoice(payment.order_id, { printAfterLoad: true })}>
-                        {getInvoiceDocumentLabel({ payment })}
+                        Imprimer
                       </button>
                     </td>
                   </tr>
@@ -1869,8 +2167,39 @@ export const CashierHistoryModule = () => {
             <p><strong>Sous-total menus :</strong> {formatCurrency(selectedInvoice.items_subtotal || selectedInvoice.subtotal || selectedInvoice.total)}</p>
             <p><strong>Sous-total :</strong> {formatCurrency(selectedInvoice.subtotal || selectedInvoice.total)}</p>
             <p><strong>Reduction :</strong> {Number(selectedInvoice.discount_percent || 0)}% ({formatCurrency(selectedInvoice.discount_amount || 0)})</p>
-            <p><strong>{getInvoiceTotalLabel(selectedInvoice)} :</strong> {formatCurrency(selectedInvoice.total)}</p>
+            <p><strong>Total commande :</strong> {formatCurrency(selectedInvoice.total)}</p>
+            {Number((selectedInvoice?.completed_amount ?? selectedInvoicePaymentSummary?.completedAmount) || 0) > 0 ? (
+              <p><strong>Déjà encaissé :</strong> {formatCurrency(selectedInvoice?.completed_amount ?? selectedInvoicePaymentSummary?.completedAmount)}</p>
+            ) : null}
+            {Number((selectedInvoice?.remaining_amount ?? selectedInvoicePaymentSummary?.pendingAmount) || 0) > 0 ? (
+              <p><strong>{getInvoiceTotalLabel(selectedInvoice)} :</strong> {formatCurrency(selectedInvoice?.remaining_amount ?? selectedInvoicePaymentSummary?.pendingAmount)}</p>
+            ) : null}
           </div>
+
+          {selectedInvoicePaymentSummary?.payments?.length > 0 ? (
+            <div className="staff-table-wrap">
+              <table className="staff-table">
+                <thead>
+                  <tr>
+                    <th>Statut</th>
+                    <th>Mode</th>
+                    <th>Montant</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedInvoicePaymentSummary.payments.map((paymentPart) => (
+                    <tr key={paymentPart.id}>
+                      <td data-label="Statut">{paymentStatusLabel(paymentPart.status)}</td>
+                      <td data-label="Mode">{formatPaymentMethodLabel(paymentPart.settlement_method || paymentPart.method)}</td>
+                      <td data-label="Montant">{formatCurrency(paymentPart.amount)}</td>
+                      <td data-label="Date">{formatDateTime(paymentPart.encashed_at || paymentPart.printed_at || paymentPart.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
 
           <div className="staff-table-wrap">
             <table className="staff-table">

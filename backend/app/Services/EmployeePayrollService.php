@@ -98,23 +98,26 @@ class EmployeePayrollService
         $cashSourceAccount = $payload['cash_source_account'] ?? null;
 
         return DB::transaction(function () use ($user, $payload, $actorId, $amount, $paymentMethod, $cashSourceAccount) {
+            $lockedUser = $this->lockPayrollUser($user);
+            $lockedProfile = $this->lockSalaryProfile($lockedUser);
+
             $movement = $this->createPayrollOutflow(
-                user: $user,
+                user: $lockedUser,
                 actorId: $actorId,
                 amount: $amount,
                 paymentMethod: $paymentMethod,
                 cashSourceAccount: $cashSourceAccount,
                 flowType: 'employee_advance_payment',
                 reason: 'Avance sur salaire',
-                description: "Avance employee {$user->name}",
+                description: "Avance employee {$lockedUser->name}",
                 note: $payload['note'] ?? null,
                 reference: $payload['reference'] ?? null,
                 paidAt: $payload['paid_at'] ?? null,
             );
 
             return EmployeePayrollTransaction::query()->create([
-                'user_id' => (int) $user->id,
-                'salary_profile_id' => $user->salaryProfile?->id,
+                'user_id' => (int) $lockedUser->id,
+                'salary_profile_id' => $lockedProfile?->id,
                 'transaction_type' => EmployeePayrollTransaction::TYPE_ADVANCE,
                 'gross_amount' => $amount,
                 'advance_deduction_amount' => 0,
@@ -143,7 +146,10 @@ class EmployeePayrollService
             ]);
         }
 
-        $grossAmount = round((float) ($payload['gross_amount'] ?? $profile->monthly_salary), 2);
+        $requestedGrossAmount = array_key_exists('gross_amount', $payload)
+            ? round((float) $payload['gross_amount'], 2)
+            : null;
+        $grossAmount = round((float) ($requestedGrossAmount ?? $profile->monthly_salary), 2);
         if ($grossAmount <= 0) {
             throw ValidationException::withMessages([
                 'gross_amount' => ['Le salaire brut doit etre superieur a 0.'],
@@ -153,53 +159,58 @@ class EmployeePayrollService
         $payrollMonth = !empty($payload['payroll_month'])
             ? Carbon::parse((string) $payload['payroll_month'])->startOfMonth()
             : now()->startOfMonth();
-        $alreadyCoveredGross = $this->coveredSalaryAmountForMonth($user, $payrollMonth);
-        $remainingGrossCoverage = round(max(0, (float) $profile->monthly_salary - $alreadyCoveredGross), 2);
+        $this->validateRemainingSalaryCoverage($user, $profile, $payrollMonth, $grossAmount);
 
-        if ($remainingGrossCoverage <= 0) {
-            throw ValidationException::withMessages([
-                'gross_amount' => ['Le salaire de ce mois est déjà entièrement couvert.'],
-            ]);
-        }
-
-        if ($grossAmount > $remainingGrossCoverage) {
-            throw ValidationException::withMessages([
-                'gross_amount' => ["Le salaire brut dépasse le reliquat du mois ({$remainingGrossCoverage})."],
-            ]);
-        }
-
-        $outstandingAdvance = $this->outstandingAdvanceAmount($user);
         $requestedDeduction = array_key_exists('advance_deduction_amount', $payload)
             ? round(max(0, (float) $payload['advance_deduction_amount']), 2)
-            : $outstandingAdvance;
-        $advanceDeductionAmount = round(min($grossAmount, $outstandingAdvance, $requestedDeduction), 2);
-        $netAmount = round(max(0, $grossAmount - $advanceDeductionAmount), 2);
+            : null;
         $paymentMethod = (string) ($payload['payment_method'] ?? 'cash');
         $cashSourceAccount = $payload['cash_source_account'] ?? null;
 
         return DB::transaction(function () use (
             $user,
-            $profile,
             $payload,
             $actorId,
-            $grossAmount,
-            $advanceDeductionAmount,
-            $netAmount,
+            $requestedGrossAmount,
+            $requestedDeduction,
             $paymentMethod,
             $cashSourceAccount,
             $payrollMonth
         ) {
+            $lockedUser = $this->lockPayrollUser($user);
+            $lockedProfile = $this->lockSalaryProfile($lockedUser);
+
+            if (!$lockedProfile || (float) ($lockedProfile->monthly_salary ?? 0) <= 0) {
+                throw ValidationException::withMessages([
+                    'user_id' => ['Configurez d\'abord le salaire mensuel de cet employe.'],
+                ]);
+            }
+
+            $grossAmount = round((float) ($requestedGrossAmount ?? $lockedProfile->monthly_salary), 2);
+            if ($grossAmount <= 0) {
+                throw ValidationException::withMessages([
+                    'gross_amount' => ['Le salaire brut doit etre superieur a 0.'],
+                ]);
+            }
+
+            $this->validateRemainingSalaryCoverage($lockedUser, $lockedProfile, $payrollMonth, $grossAmount);
+
+            $outstandingAdvance = $this->outstandingAdvanceAmount($lockedUser);
+            $effectiveRequestedDeduction = $requestedDeduction ?? $outstandingAdvance;
+            $advanceDeductionAmount = round(min($grossAmount, $outstandingAdvance, $effectiveRequestedDeduction), 2);
+            $netAmount = round(max(0, $grossAmount - $advanceDeductionAmount), 2);
+
             $movement = null;
             if ($netAmount > 0) {
                 $movement = $this->createPayrollOutflow(
-                    user: $user,
+                    user: $lockedUser,
                     actorId: $actorId,
                     amount: $netAmount,
                     paymentMethod: $paymentMethod,
                     cashSourceAccount: $cashSourceAccount,
                     flowType: 'employee_salary_payment',
                     reason: 'Paiement salaire',
-                    description: "Salaire employee {$user->name}",
+                    description: "Salaire employee {$lockedUser->name}",
                     note: $payload['note'] ?? null,
                     reference: $payload['reference'] ?? null,
                     paidAt: $payload['paid_at'] ?? null,
@@ -208,8 +219,8 @@ class EmployeePayrollService
 
             /** @var EmployeePayrollTransaction $salaryTransaction */
             $salaryTransaction = EmployeePayrollTransaction::query()->create([
-                'user_id' => (int) $user->id,
-                'salary_profile_id' => (int) $profile->id,
+                'user_id' => (int) $lockedUser->id,
+                'salary_profile_id' => (int) $lockedProfile->id,
                 'transaction_type' => EmployeePayrollTransaction::TYPE_SALARY_PAYMENT,
                 'gross_amount' => $grossAmount,
                 'advance_deduction_amount' => $advanceDeductionAmount,
@@ -229,11 +240,33 @@ class EmployeePayrollService
             ]);
 
             if ($advanceDeductionAmount > 0) {
-                $this->applyAdvanceSettlements($user, $salaryTransaction, $advanceDeductionAmount);
+                $this->applyAdvanceSettlements($lockedUser, $salaryTransaction, $advanceDeductionAmount);
             }
 
             return $salaryTransaction->fresh();
         });
+    }
+
+    private function validateRemainingSalaryCoverage(
+        User $user,
+        EmployeeSalaryProfile $profile,
+        Carbon $payrollMonth,
+        float $grossAmount
+    ): void {
+        $alreadyCoveredGross = $this->coveredSalaryAmountForMonth($user, $payrollMonth);
+        $remainingGrossCoverage = round(max(0, (float) $profile->monthly_salary - $alreadyCoveredGross), 2);
+
+        if ($remainingGrossCoverage <= 0) {
+            throw ValidationException::withMessages([
+                'gross_amount' => ['Le salaire de ce mois est déjà entièrement couvert.'],
+            ]);
+        }
+
+        if ($grossAmount > $remainingGrossCoverage) {
+            throw ValidationException::withMessages([
+                'gross_amount' => ["Le salaire brut dépasse le reliquat du mois ({$remainingGrossCoverage})."],
+            ]);
+        }
     }
 
     private function coveredSalaryAmountForMonth(User $user, Carbon $payrollMonth): float
@@ -283,6 +316,25 @@ class EmployeePayrollService
 
             $remaining = round($remaining - $applied, 2);
         }
+    }
+
+    private function lockPayrollUser(User $user): User
+    {
+        /** @var User $lockedUser */
+        $lockedUser = User::query()
+            ->whereKey($user->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        return $lockedUser;
+    }
+
+    private function lockSalaryProfile(User $user): ?EmployeeSalaryProfile
+    {
+        return EmployeeSalaryProfile::query()
+            ->where('user_id', $user->id)
+            ->lockForUpdate()
+            ->first();
     }
 
     private function createPayrollOutflow(

@@ -224,6 +224,11 @@ class EmployeePayrollManagementTest extends TestCase
             ->where('flow_type', 'employee_salary_payment')
             ->where('source_account', CashMovement::ACCOUNT_BANK)
             ->count());
+
+        $this->getJson('/api/admin/treasury')
+            ->assertOk()
+            ->assertJsonPath('summary.accounts.bank.balance', 150000)
+            ->assertJsonPath('summary.total_internal_balance', 150000);
     }
 
     private function seedApprovedBalance(User $admin, string $account, float $amount, ?string $paymentMethod = null): void

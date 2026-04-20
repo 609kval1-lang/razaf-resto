@@ -1,7 +1,24 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 const BROWSER_ORIGIN = typeof window !== 'undefined' ? window.location.origin : '';
+const DEFAULT_API_BASE_URL = (() => {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:8000/api';
+  }
+
+  const { protocol, hostname, port, origin } = window.location;
+  const normalizedPort = String(port || '').trim();
+  const isFrontendDevServer = ['3000', '3001', '5173', '4173'].includes(normalizedPort);
+  const isLocalHost = ['localhost', '127.0.0.1'].includes(String(hostname || '').trim().toLowerCase());
+
+  if (isFrontendDevServer) {
+    return `${protocol}//${isLocalHost ? 'localhost' : hostname}:8000/api`;
+  }
+
+  return `${origin.replace(/\/+$/, '')}/api`;
+})();
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || DEFAULT_API_BASE_URL;
 const NORMALIZED_API_BASE_URL = String(API_BASE_URL || '').replace(/\/+$/, '');
 const API_ORIGIN = (() => {
   try {
@@ -155,7 +172,7 @@ export const adminAPI = {
   deleteTable: (tableId) => api.delete(`/admin/tables/${tableId}`),
 
   // Raw Materials
-  getRawMaterials: () => api.get('/admin/raw-materials'),
+  getRawMaterials: (params) => api.get('/admin/raw-materials', { params }),
   getRawMaterialPriceVariations: () => api.get('/admin/raw-materials/price-variations'),
   createRawMaterial: (materialData) => api.post('/admin/raw-materials', materialData),
   updateRawMaterial: (materialId, materialData) => api.put(`/admin/raw-materials/${materialId}`, materialData),
@@ -201,7 +218,7 @@ export const adminAPI = {
   getRevenueReport: (params) => api.get('/admin/revenue-report', { params }),
 
   // Cash register movements
-  getCashMovements: () => api.get('/admin/cash-movements'),
+  getCashMovements: (params) => api.get('/admin/cash-movements', { params }),
   getTreasurySnapshot: () => api.get('/admin/treasury'),
   createTreasuryTransfer: (payload) => api.post('/admin/treasury/transfers', payload),
   createTreasuryWithdrawal: (payload) => api.post('/admin/treasury/withdrawals', payload),
@@ -238,7 +255,7 @@ export const serverAPI = {
   createOrder: (orderData) => api.post('/server/orders', orderData),
   markOrderItemServed: (itemId) => api.post(`/server/order-items/${itemId}/serve`),
   requestBill: (orderId) => api.post(`/server/orders/${orderId}/request-bill`),
-  getMyOrders: () => api.get('/server/my-orders'),
+  getMyOrders: (params) => api.get('/server/my-orders', { params }),
 };
 
 // ============ KITCHEN API ============
