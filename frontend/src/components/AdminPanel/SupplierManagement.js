@@ -91,6 +91,92 @@ const buildLedgerSummary = (purchaseList) => {
   };
 };
 
+const toTimestamp = (value) => {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+const buildGroupedSupplierAlerts = (alertList) => {
+  const alerts = Array.isArray(alertList) ? alertList : [];
+  const groupedAlerts = new Map();
+
+  alerts.forEach((alert) => {
+    const supplierId = Number(alert?.supplier_id || 0);
+    const supplierName = String(alert?.supplier_name || 'Fournisseur inconnu').trim() || 'Fournisseur inconnu';
+    const alertKey = supplierId > 0
+      ? `supplier-${supplierId}`
+      : `supplier-name-${supplierName.toLowerCase()}`;
+    const remainingAmount = roundCurrency(Number(alert?.remaining_amount || 0));
+    const dueDate = alert?.due_date ? String(alert.due_date) : null;
+    const purchasedAt = alert?.purchased_at || null;
+    const rawMaterialName = String(alert?.raw_material_name || '').trim();
+    const isOverdue = Boolean(alert?.is_overdue);
+
+    if (!groupedAlerts.has(alertKey)) {
+      groupedAlerts.set(alertKey, {
+        supplier_id: supplierId > 0 ? supplierId : null,
+        supplier_name: supplierName,
+        total_remaining_amount: 0,
+        unpaid_purchases_count: 0,
+        overdue_purchases_count: 0,
+        next_due_date: dueDate,
+        latest_purchased_at: purchasedAt,
+        raw_material_names: [],
+        is_overdue: false,
+        severity: isOverdue ? 'low' : (alert?.severity || 'warning'),
+      });
+    }
+
+    const currentGroup = groupedAlerts.get(alertKey);
+
+    currentGroup.total_remaining_amount = roundCurrency(currentGroup.total_remaining_amount + remainingAmount);
+    currentGroup.unpaid_purchases_count += 1;
+    currentGroup.overdue_purchases_count += isOverdue ? 1 : 0;
+    currentGroup.is_overdue = currentGroup.is_overdue || isOverdue;
+    currentGroup.severity = currentGroup.is_overdue ? 'low' : currentGroup.severity;
+
+    if (rawMaterialName && !currentGroup.raw_material_names.includes(rawMaterialName)) {
+      currentGroup.raw_material_names.push(rawMaterialName);
+    }
+
+    const currentDueTimestamp = toTimestamp(currentGroup.next_due_date);
+    const incomingDueTimestamp = toTimestamp(dueDate);
+    if (incomingDueTimestamp !== null && (currentDueTimestamp === null || incomingDueTimestamp < currentDueTimestamp)) {
+      currentGroup.next_due_date = dueDate;
+    }
+
+    const currentPurchaseTimestamp = toTimestamp(currentGroup.latest_purchased_at);
+    const incomingPurchaseTimestamp = toTimestamp(purchasedAt);
+    if (incomingPurchaseTimestamp !== null && (currentPurchaseTimestamp === null || incomingPurchaseTimestamp > currentPurchaseTimestamp)) {
+      currentGroup.latest_purchased_at = purchasedAt;
+    }
+  });
+
+  return Array.from(groupedAlerts.values())
+    .map((group) => ({
+      ...group,
+      total_remaining_amount: roundCurrency(group.total_remaining_amount),
+      visible_raw_material_names: group.raw_material_names.slice(0, 3),
+      hidden_raw_materials_count: Math.max(0, group.raw_material_names.length - 3),
+    }))
+    .sort((left, right) => {
+      if (left.is_overdue !== right.is_overdue) {
+        return left.is_overdue ? -1 : 1;
+      }
+
+      const leftDueTimestamp = toTimestamp(left.next_due_date);
+      const rightDueTimestamp = toTimestamp(right.next_due_date);
+      if (leftDueTimestamp === null && rightDueTimestamp !== null) return 1;
+      if (leftDueTimestamp !== null && rightDueTimestamp === null) return -1;
+      if (leftDueTimestamp !== null && rightDueTimestamp !== null && leftDueTimestamp !== rightDueTimestamp) {
+        return leftDueTimestamp - rightDueTimestamp;
+      }
+
+      return Number(right.total_remaining_amount || 0) - Number(left.total_remaining_amount || 0);
+    });
+};
+
 const mergeUpdatedPurchaseIntoLedger = (currentLedger, updatedPurchase) => {
   if (!currentLedger || !updatedPurchase) return currentLedger;
 
@@ -215,7 +301,11 @@ const SupplierManagement = () => {
   const [activeSupplierPaymentAction, setActiveSupplierPaymentAction] = useState('outstanding_debts');
 
   const summary = alertsData?.summary || {};
-  const alerts = Array.isArray(alertsData?.alerts) ? alertsData.alerts : [];
+  const alerts = useMemo(
+    () => (Array.isArray(alertsData?.alerts) ? alertsData.alerts : []),
+    [alertsData],
+  );
+  const groupedAlerts = useMemo(() => buildGroupedSupplierAlerts(alerts), [alerts]);
   const purchases = useMemo(
     () => (Array.isArray(ledger?.purchases) ? ledger.purchases : []),
     [ledger],
@@ -947,31 +1037,39 @@ const SupplierManagement = () => {
 
         <div className="card" style={{ margin: 0, padding: '12px' }}>
           <h3 style={{ marginBottom: '10px' }}>Alertes Paiements Fournisseur</h3>
-          {alerts.length === 0 ? (
+          {groupedAlerts.length === 0 ? (
             <div className="alert-empty">Aucun reste a payer en alerte.</div>
           ) : (
             <div className="alert-list">
-              {alerts.slice(0, 12).map((alert) => (
-                <button
-                  key={`alert-${alert.purchase_id}`}
-                  type="button"
-                  className={`alert-item supplier-payment-alert ${alert.severity || 'warning'}`}
-                  onClick={() => openSupplierFollow(alert.supplier_id, {
-                    purchaseId: alert.purchase_id,
-                    remainingAmount: alert.remaining_amount,
-                  })}
-                >
-                  <div>
-                    <strong>{alert.supplier_name}</strong>
-                    <p>{alert.raw_material_name} · Achat #{alert.purchase_id} · Reste: {formatCurrency(alert.remaining_amount)}</p>
-                    <p>Date achat: {formatDate(alert.purchased_at, true)} · Echeance: {formatDate(alert.due_date)}</p>
-                    <p className="supplier-payment-alert-hint">Cliquer pour ouvrir le suivi et payer cet achat.</p>
-                  </div>
-                  <span className={`stock-status ${alert.is_overdue ? 'low' : 'warning'}`}>
-                    {alert.is_overdue ? 'En retard' : 'A regler'}
-                  </span>
-                </button>
-              ))}
+              {groupedAlerts.slice(0, 12).map((alert) => {
+                const materialsPreview = alert.visible_raw_material_names.join(', ');
+                const hasExtraMaterials = Number(alert.hidden_raw_materials_count || 0) > 0;
+
+                return (
+                  <button
+                    key={`alert-${alert.supplier_id || alert.supplier_name}`}
+                    type="button"
+                    className={`alert-item supplier-payment-alert ${alert.severity || 'warning'}`}
+                    onClick={() => openSupplierFollow(alert.supplier_id)}
+                  >
+                    <div>
+                      <strong>{alert.supplier_name}</strong>
+                      <p>{alert.unpaid_purchases_count} achat(s) impaye(s) · Total restant: {formatCurrency(alert.total_remaining_amount)}</p>
+                      {materialsPreview ? (
+                        <p>
+                          Matieres concernees: {materialsPreview}
+                          {hasExtraMaterials ? ` +${alert.hidden_raw_materials_count}` : ''}
+                        </p>
+                      ) : null}
+                      <p>Echeance la plus proche: {formatDate(alert.next_due_date)} · Dernier achat: {formatDate(alert.latest_purchased_at, true)}</p>
+                      <p className="supplier-payment-alert-hint">Cliquer pour ouvrir le suivi, choisir un achat a regler ou payer ce fournisseur en une fois.</p>
+                    </div>
+                    <span className={`stock-status ${alert.is_overdue ? 'low' : 'warning'}`}>
+                      {alert.is_overdue ? `${alert.overdue_purchases_count} en retard` : 'A regler'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

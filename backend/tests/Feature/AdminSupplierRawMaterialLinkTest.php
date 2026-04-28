@@ -894,4 +894,98 @@ class AdminSupplierRawMaterialLinkTest extends TestCase
             'raw_material_id' => $sharedRawMaterial->id,
         ]);
     }
+
+    public function test_changing_raw_material_preferred_supplier_keeps_existing_debt_on_original_supplier(): void
+    {
+        $this->actingAsAdmin();
+
+        $rawMaterial = RawMaterial::create([
+            'name' => 'Vanille',
+            'description' => null,
+            'stock' => 10,
+            'unit' => 'kg',
+            'cost' => 12000,
+            'reorder_level' => 2,
+        ]);
+
+        $supplierA = Supplier::create([
+            'name' => 'Supplier historique',
+            'email' => 'supplier-historique@test.local',
+            'phone' => '+261331111111',
+            'raw_material_id' => $rawMaterial->id,
+        ]);
+        $supplierA->rawMaterials()->syncWithoutDetaching([$rawMaterial->id]);
+
+        $supplierB = Supplier::create([
+            'name' => 'Supplier nouveau',
+            'email' => 'supplier-nouveau@test.local',
+            'phone' => '+261332222222',
+        ]);
+
+        $existingPurchase = SupplierPurchase::create([
+            'supplier_id' => $supplierA->id,
+            'raw_material_id' => $rawMaterial->id,
+            'quantity' => 4,
+            'unit_price' => 10000,
+            'total_amount' => 40000,
+            'paid_amount' => 0,
+            'remaining_amount' => 40000,
+            'payment_mode' => 'credit',
+            'payment_status' => 'unpaid',
+            'purchased_at' => now()->subDays(2),
+            'due_date' => now()->addDays(20)->toDateString(),
+            'note' => 'Dette historique',
+        ]);
+
+        $response = $this->putJson("/api/admin/raw-materials/{$rawMaterial->id}", [
+            'name' => 'Vanille',
+            'description' => null,
+            'stock' => 15,
+            'unit' => 'kg',
+            'cost' => 12000,
+            'reorder_level' => 2,
+            'supplier_id' => $supplierB->id,
+            'stock_update_mode' => 'purchase',
+            'purchase_unit_price' => 15000,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('stock', '15.00');
+
+        $this->assertDatabaseHas('supplier_purchases', [
+            'id' => $existingPurchase->id,
+            'supplier_id' => $supplierA->id,
+            'raw_material_id' => $rawMaterial->id,
+            'remaining_amount' => 40000,
+        ]);
+
+        $newPurchase = SupplierPurchase::query()
+            ->where('supplier_id', $supplierB->id)
+            ->where('raw_material_id', $rawMaterial->id)
+            ->latest('id')
+            ->first();
+
+        $this->assertNotNull($newPurchase);
+        $this->assertNotSame((int) $existingPurchase->id, (int) $newPurchase->id);
+        $this->assertSame(75000.0, (float) $newPurchase->total_amount);
+        $this->assertSame(75000.0, (float) $newPurchase->remaining_amount);
+
+        $supplierALedger = $this->getJson("/api/admin/suppliers/{$supplierA->id}/ledger");
+        $supplierALedger->assertOk()
+            ->assertJsonPath('summary.total_remaining', 40000)
+            ->assertJsonPath('summary.unpaid_purchases_count', 1);
+
+        $supplierBLedger = $this->getJson("/api/admin/suppliers/{$supplierB->id}/ledger");
+        $supplierBLedger->assertOk()
+            ->assertJsonPath('summary.total_remaining', 75000)
+            ->assertJsonPath('summary.unpaid_purchases_count', 1);
+
+        $supplierAPurchaseIds = collect($supplierALedger->json('purchases'))->pluck('id')->map(fn ($id) => (int) $id);
+        $supplierBPurchaseIds = collect($supplierBLedger->json('purchases'))->pluck('id')->map(fn ($id) => (int) $id);
+
+        $this->assertTrue($supplierAPurchaseIds->contains((int) $existingPurchase->id));
+        $this->assertFalse($supplierAPurchaseIds->contains((int) $newPurchase->id));
+        $this->assertTrue($supplierBPurchaseIds->contains((int) $newPurchase->id));
+        $this->assertFalse($supplierBPurchaseIds->contains((int) $existingPurchase->id));
+    }
 }

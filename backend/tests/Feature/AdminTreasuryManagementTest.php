@@ -154,4 +154,108 @@ class AdminTreasuryManagementTest extends TestCase
 
         $this->assertTrue($treasuryMovementIds->contains((int) $safeMovement->id));
     }
+
+    public function test_cash_available_is_consistent_between_cashier_and_admin_views(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $cashier = User::factory()->create(['role' => 'cashier']);
+
+        CashMovement::query()->create([
+            'direction' => 'in',
+            'status' => 'approved',
+            'movement_type' => 'sale',
+            'flow_type' => 'customer_payment',
+            'amount' => 20000,
+            'payment_method' => 'cash',
+            'destination_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Base caisse',
+            'reason' => 'Encaissement cash',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'transfer',
+            'flow_type' => 'treasury_transfer',
+            'amount' => 6000,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'destination_account' => CashMovement::ACCOUNT_BANK,
+            'description' => 'Depot banque',
+            'reason' => 'Vidage partiel caisse',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'pending',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'cash_withdrawal_request',
+            'amount' => 1500,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Sortie en attente',
+            'reason' => 'Petite caisse',
+            'requested_by_user_id' => $cashier->id,
+        ]);
+
+        CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'supplier_payment',
+            'amount' => 3000,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_SAFE,
+            'description' => 'Paiement coffre',
+            'reason' => 'Fournisseur',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        Sanctum::actingAs($cashier);
+
+        $cashierStats = $this->getJson('/api/cashier/stats');
+        $cashierMovements = $this->getJson('/api/cashier/cash-movements');
+
+        $cashierStats->assertOk()
+            ->assertJsonPath('cash_register.cash_available', 14000)
+            ->assertJsonPath('cash_register.cash_out_pending', 1500);
+
+        $cashierMovements->assertOk()
+            ->assertJsonPath('summary.cash_available', 14000)
+            ->assertJsonPath('summary.cash_out_pending', 1500);
+
+        Sanctum::actingAs($admin);
+
+        $adminCash = $this->getJson('/api/admin/cash-movements');
+        $treasury = $this->getJson('/api/admin/treasury');
+
+        $adminCash->assertOk()
+            ->assertJsonPath('summary.cash_available', 14000)
+            ->assertJsonPath('summary.cash_out_pending', 1500);
+
+        $treasury->assertOk()
+            ->assertJsonPath('summary.cash_available', 14000)
+            ->assertJsonPath('summary.accounts.cash.balance', 14000);
+
+        $this->assertSame(
+            (float) $cashierStats->json('cash_register.cash_available'),
+            (float) $cashierMovements->json('summary.cash_available')
+        );
+        $this->assertSame(
+            (float) $cashierStats->json('cash_register.cash_available'),
+            (float) $adminCash->json('summary.cash_available')
+        );
+        $this->assertSame(
+            (float) $cashierStats->json('cash_register.cash_available'),
+            (float) $treasury->json('summary.accounts.cash.balance')
+        );
+    }
 }

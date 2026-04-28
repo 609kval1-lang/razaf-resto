@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Http\Controllers\Controller;
+use App\Services\TreasuryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -720,7 +721,7 @@ class CashierController extends Controller
                 'cash_in_approved' => round($cashInApprovedToday, 2),
                 'cash_out_approved' => round($cashOutApprovedToday, 2),
                 'cash_out_pending' => round($cashOutPendingToday, 2),
-                'cash_available' => round($cashInApprovedTotal - $cashOutApprovedTotal, 2),
+                'cash_available' => app(TreasuryService::class)->accountAvailableAmount(CashMovement::ACCOUNT_CASH),
                 'cash_in_total' => round($cashInApprovedTotal, 2),
                 'cash_out_total' => round($cashOutApprovedTotal, 2),
                 'cash_out_pending_total' => round($cashOutPendingTotal, 2),

@@ -111,7 +111,7 @@ class TreasuryService
             : null;
     }
 
-    private function accountAvailableAmount(string $account, bool $lockForUpdate = false): float
+    public function accountAvailableAmount(string $account, bool $lockForUpdate = false): float
     {
         $balances = $this->accountBalances($lockForUpdate);
 
