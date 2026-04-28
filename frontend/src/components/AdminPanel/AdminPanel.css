@@ -379,6 +379,18 @@
   margin-bottom: 14px;
 }
 
+.revenue-ranking-toolbar {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid #dbe7f3;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 32%),
+    linear-gradient(180deg, #f8fbff, #f1f7ff);
+}
+
 .revenue-dashboard-section-header {
   display: flex;
   align-items: baseline;
@@ -1113,6 +1125,94 @@
   font-size: 0.84rem;
 }
 
+.treasury-history-toolbar {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid #dbe7f3;
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 32%),
+    linear-gradient(180deg, #f8fbff, #f1f7ff);
+}
+
+.treasury-filter-block {
+  display: grid;
+  gap: 8px;
+}
+
+.treasury-filter-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.treasury-filter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.treasury-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border: 1px solid #cdd9e8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.treasury-filter-toggle:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  box-shadow: 0 8px 18px rgba(148, 163, 184, 0.14);
+}
+
+.treasury-filter-toggle span {
+  color: inherit;
+}
+
+.treasury-filter-toggle strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #1e293b;
+  font-size: 0.76rem;
+}
+
+.treasury-filter-toggle.is-active {
+  border-color: #0f766e;
+  background: linear-gradient(180deg, #ecfdf5, #dff7f1);
+  color: #115e59;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
+}
+
+.treasury-filter-toggle.is-active strong {
+  background: rgba(15, 118, 110, 0.14);
+  color: #0f766e;
+}
+
+.treasury-history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 @media (max-width: 900px) {
   .supplier-bulk-settlement-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1124,6 +1224,10 @@
 
   .supplier-bulk-settlement-actions .btn {
     width: 100%;
+  }
+
+  .treasury-history-summary {
+    justify-content: flex-start;
   }
 }
 

@@ -116,6 +116,13 @@ const getCategoryMeta = (rawCategory) => {
 
 const TOP_OPTIONS = [3, 5, 10];
 const REVENUE_REFRESH_INTERVAL_MS = 5000;
+const SCOPE_OPTIONS = [
+  { value: 'day', label: "Aujourd'hui" },
+  { value: 'rolling_week', label: '7 derniers jours' },
+  { value: 'rolling_month', label: '30 derniers jours' },
+  { value: 'week', label: 'Semaine en cours' },
+  { value: 'month', label: 'Mois en cours' },
+];
 
 const actionMetaMap = {
   increase: { label: 'Hausse proposée', className: 'pricing-action increase' },
@@ -165,6 +172,18 @@ const defaultReport = {
   top_demanded: [],
   top_profitable: [],
   top_grossing: [],
+};
+
+const normalizeRankingRows = (rows) => {
+  return rows.map((row) => {
+    const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_category);
+    return {
+      ...row,
+      category_key: categoryMeta.key,
+      category_label: categoryMeta.label,
+      category_order: categoryMeta.order,
+    };
+  });
 };
 
 const RevenueDashboard = () => {
@@ -290,18 +309,6 @@ const RevenueDashboard = () => {
     return user ? `${user.name} (${user.role})` : 'Utilisateur';
   }, [selectedUserId, users]);
 
-  const normalizeRankingRows = (rows) => {
-    return rows.map((row) => {
-      const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_category);
-      return {
-        ...row,
-        category_key: categoryMeta.key,
-        category_label: categoryMeta.label,
-        category_order: categoryMeta.order,
-      };
-    });
-  };
-
   const bestRows = useMemo(() => {
     const key = selectedMetricConfig.bestKey;
     const source = normalizeRankingRows(Array.isArray(rankings[key]) ? rankings[key] : []);
@@ -392,6 +399,30 @@ const RevenueDashboard = () => {
 
     return categoryTopRows;
   }, [rankingView, categoryTopRows, bestRows, worstRows]);
+
+  const categoryFilterSourceRows = useMemo(() => {
+    if (rankingView === 'worst') {
+      return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.worstKey]) ? rankings[selectedMetricConfig.worstKey] : []);
+    }
+
+    if (rankingView === 'best') {
+      return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.bestKey]) ? rankings[selectedMetricConfig.bestKey] : []);
+    }
+
+    return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.bestKey]) ? rankings[selectedMetricConfig.bestKey] : [])
+      .filter((row) => Number(row.total_quantity || 0) > 0);
+  }, [rankingView, rankings, selectedMetricConfig.bestKey, selectedMetricConfig.worstKey]);
+
+  const categoryRowCounts = useMemo(() => {
+    const counts = categoryFilterSourceRows.reduce((accumulator, row) => {
+      const key = String(row.category_key || 'autres');
+      accumulator[key] = (accumulator[key] || 0) + 1;
+      return accumulator;
+    }, {});
+
+    counts.all = categoryFilterSourceRows.length;
+    return counts;
+  }, [categoryFilterSourceRows]);
 
   const normalizedMenuPricingImpact = useMemo(() => {
     return menuPricingImpact
@@ -558,6 +589,12 @@ const RevenueDashboard = () => {
       ? `Aucun résultat pour ${unifiedRankingTitle.toLowerCase()} dans la catégorie ${selectedCategoryMeta.label}.`
       : `Aucun résultat pour ${unifiedRankingTitle.toLowerCase()} sur la période.`
   );
+
+  const rankingViewOptions = [
+    { value: 'top', label: 'Top plats' },
+    { value: 'best', label: selectedMetricConfig.bestTitle },
+    { value: 'worst', label: selectedMetricConfig.worstTitle },
+  ];
 
   const menuImpactSummary = useMemo(() => {
     return filteredMenuPricingImpact.reduce((acc, row) => {
@@ -762,67 +799,118 @@ const RevenueDashboard = () => {
             Vue: <strong>{report?.filters?.scope_label || scopeLabel(scope)}</strong> · Utilisateur: <strong>{selectedUserLabel}</strong> · Intervalle analysé: du <strong>{formatDateTime(report?.filters?.from)}</strong> au <strong>{formatDateTime(report?.filters?.to)}</strong>
           </div>
         </div>
-        <div className="revenue-dashboard-filters">
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Période</span>
-            <select value={scope} onChange={(event) => setScope(event.target.value)}>
-              <option value="day">Aujourd'hui</option>
-              <option value="rolling_week">7 derniers jours</option>
-              <option value="rolling_month">30 derniers jours</option>
-              <option value="week">Semaine en cours</option>
-              <option value="month">Mois en cours</option>
-            </select>
-          </label>
+        <div className="revenue-ranking-toolbar">
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Période</span>
+            <div className="treasury-filter-toggles">
+              {SCOPE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`treasury-filter-toggle ${scope === option.value ? 'is-active' : ''}`}
+                  onClick={() => setScope(option.value)}
+                >
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Utilisateur</span>
-            <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
-              <option value="all">Tous les utilisateurs</option>
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Utilisateur</span>
+            <div className="treasury-filter-toggles">
+              <button
+                type="button"
+                className={`treasury-filter-toggle ${selectedUserId === 'all' ? 'is-active' : ''}`}
+                onClick={() => setSelectedUserId('all')}
+              >
+                <span>Tous les utilisateurs</span>
+              </button>
               {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name} ({user.role})
-                </option>
+                <button
+                  key={user.id}
+                  type="button"
+                  className={`treasury-filter-toggle ${selectedUserId === String(user.id) ? 'is-active' : ''}`}
+                  onClick={() => setSelectedUserId(String(user.id))}
+                >
+                  <span>{user.name} ({user.role})</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
 
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Taille du top</span>
-            <select value={topLimit} onChange={(event) => setTopLimit(Number(event.target.value))}>
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Taille du top</span>
+            <div className="treasury-filter-toggles">
               {TOP_OPTIONS.map((option) => (
-                <option key={option} value={option}>Top {option}</option>
+                <button
+                  key={option}
+                  type="button"
+                  className={`treasury-filter-toggle ${topLimit === option ? 'is-active' : ''}`}
+                  onClick={() => setTopLimit(option)}
+                >
+                  <span>Top {option}</span>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
 
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Indicateur</span>
-            <select value={rankingMetric} onChange={(event) => setRankingMetric(event.target.value)}>
-              <option value="demand">Demande</option>
-              <option value="profit">Rentabilité (profit)</option>
-              <option value="margin">Benefice / cout (%)</option>
-              <option value="revenue">Recette brute</option>
-            </select>
-          </label>
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Indicateur</span>
+            <div className="treasury-filter-toggles">
+              {Object.entries(rankingMetricConfig).map(([metricKey, metricConfig]) => (
+                <button
+                  key={metricKey}
+                  type="button"
+                  className={`treasury-filter-toggle ${rankingMetric === metricKey ? 'is-active' : ''}`}
+                  onClick={() => setRankingMetric(metricKey)}
+                >
+                  <span>{metricConfig.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Vue classement</span>
-            <select value={rankingView} onChange={(event) => setRankingView(event.target.value)}>
-              <option value="top">Top plats</option>
-              <option value="best">{selectedMetricConfig.bestTitle}</option>
-              <option value="worst">{selectedMetricConfig.worstTitle}</option>
-            </select>
-          </label>
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Vue classement</span>
+            <div className="treasury-filter-toggles">
+              {rankingViewOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`treasury-filter-toggle ${rankingView === option.value ? 'is-active' : ''}`}
+                  onClick={() => setRankingView(option.value)}
+                >
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <label className="form-group" style={{ marginBottom: 0 }}>
-            <span>Catégorie</span>
-            <select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
-              <option value="all">Toutes catégories</option>
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Catégorie</span>
+            <div className="treasury-filter-toggles">
+              <button
+                type="button"
+                className={`treasury-filter-toggle ${selectedCategory === 'all' ? 'is-active' : ''}`}
+                onClick={() => setSelectedCategory('all')}
+              >
+                <span>Toutes catégories</span>
+                <strong>{categoryRowCounts.all || 0}</strong>
+              </button>
               {categoryOptions.map((option) => (
-                <option key={option.key} value={option.key}>{option.label}</option>
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`treasury-filter-toggle ${selectedCategory === option.key ? 'is-active' : ''}`}
+                  onClick={() => setSelectedCategory(option.key)}
+                >
+                  <span>{option.label}</span>
+                  <strong>{categoryRowCounts[option.key] || 0}</strong>
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
         </div>
         <DataTable
           columns={unifiedRankingColumns}

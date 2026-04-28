@@ -52,6 +52,15 @@ const STATUS_LABELS = {
 const ACCOUNT_ORDER = ['cash', 'safe', 'bank', 'mobile_money'];
 const IMMEDIATE_PAYMENT_METHOD_OPTIONS = PAYMENT_METHOD_OPTIONS.filter((option) => option.value !== 'bon');
 const TREASURY_REFRESH_INTERVAL_MS = 5000;
+const MOVEMENT_FLOW_FILTERS = [
+  { value: 'all', label: 'Tous les flux', flowTypes: [] },
+  { value: 'customer', label: 'Clients', flowTypes: ['customer_payment', 'customer_voucher_settlement'] },
+  { value: 'supplier', label: 'Fournisseurs', flowTypes: ['supplier_payment'] },
+  { value: 'employee', label: 'Employés', flowTypes: ['employee_advance_payment', 'employee_salary_payment'] },
+  { value: 'transfer', label: 'Transferts', flowTypes: ['treasury_transfer'] },
+  { value: 'treasury_withdrawal', label: 'Décaissements admin', flowTypes: ['treasury_withdrawal'] },
+  { value: 'cash_withdrawal', label: 'Sorties caisse', flowTypes: ['cash_withdrawal_request', 'cash_withdrawal'] },
+];
 
 const getTargetAccountLabelForMethod = (method) => {
   const normalizedMethod = normalizePaymentMethod(method);
@@ -192,6 +201,10 @@ const TreasuryManagement = () => {
   const [movements, setMovements] = useState([]);
   const [pendingVouchers, setPendingVouchers] = useState([]);
   const [recentCustomerPayments, setRecentCustomerPayments] = useState([]);
+  const [movementFilters, setMovementFilters] = useState({
+    flow: 'all',
+    account: 'all',
+  });
   const [voucherSettlementForms, setVoucherSettlementForms] = useState({});
   const [transferForm, setTransferForm] = useState({
     amount: '',
@@ -349,6 +362,42 @@ const TreasuryManagement = () => {
   const selectedWithdrawalReason = useMemo(() => {
     return withdrawalReasonOptions.find((option) => option.value === withdrawalForm.reason_category) || null;
   }, [withdrawalForm.reason_category, withdrawalReasonOptions]);
+
+  const movementAccountFilterOptions = useMemo(() => ([
+    { value: 'all', label: 'Tous les comptes' },
+    ...accountOptions.map((account) => ({
+      value: account.key,
+      label: account.label,
+    })),
+  ]), [accountOptions]);
+
+  const filteredMovements = useMemo(() => {
+    const activeFlowFilter = MOVEMENT_FLOW_FILTERS.find((option) => option.value === movementFilters.flow)
+      || MOVEMENT_FLOW_FILTERS[0];
+    const flowTypes = Array.isArray(activeFlowFilter.flowTypes) ? activeFlowFilter.flowTypes : [];
+
+    return movements.filter((movement) => {
+      const matchesFlow = flowTypes.length === 0
+        || flowTypes.includes(String(movement.flow_type || ''));
+
+      const matchesAccount = movementFilters.account === 'all'
+        || String(movement.source_account || '') === movementFilters.account
+        || String(movement.destination_account || '') === movementFilters.account;
+
+      return matchesFlow && matchesAccount;
+    });
+  }, [movementFilters.account, movementFilters.flow, movements]);
+
+  const filteredMovementAmount = useMemo(() => (
+    filteredMovements.reduce((total, movement) => total + Number(movement.amount || 0), 0)
+  ), [filteredMovements]);
+
+  const resetMovementFilters = () => {
+    setMovementFilters({
+      flow: 'all',
+      account: 'all',
+    });
+  };
 
   const submitTransfer = async (event) => {
     event.preventDefault();
@@ -902,6 +951,94 @@ const TreasuryManagement = () => {
       </div>
 
       <div className="card">
+        <h3 style={{ marginBottom: '10px' }}>Historique de trésorerie</h3>
+        <p className="form-hint" style={{ marginBottom: '10px' }}>
+          Cet historique suit tous les comptes internes. Pour les seules sorties et validations liées à la caisse, utilise plutôt la page Mouvements de caisse.
+        </p>
+        <div className="treasury-history-toolbar">
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Famille de flux</span>
+            <div className="treasury-filter-toggles">
+              {MOVEMENT_FLOW_FILTERS.map((option) => {
+                const optionCount = option.value === 'all'
+                  ? movements.length
+                  : movements.filter((movement) => option.flowTypes.includes(String(movement.flow_type || ''))).length;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`treasury-filter-toggle ${movementFilters.flow === option.value ? 'is-active' : ''}`}
+                    onClick={() => setMovementFilters((previous) => ({ ...previous, flow: option.value }))}
+                  >
+                    <span>{option.label}</span>
+                    <strong>{optionCount}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="treasury-filter-block">
+            <span className="treasury-filter-label">Compte concerné</span>
+            <div className="treasury-filter-toggles">
+              {movementAccountFilterOptions.map((option) => {
+                const optionCount = option.value === 'all'
+                  ? movements.length
+                  : movements.filter((movement) => (
+                    String(movement.source_account || '') === option.value
+                    || String(movement.destination_account || '') === option.value
+                  )).length;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`treasury-filter-toggle ${movementFilters.account === option.value ? 'is-active' : ''}`}
+                    onClick={() => setMovementFilters((previous) => ({ ...previous, account: option.value }))}
+                  >
+                    <span>{option.label}</span>
+                    <strong>{optionCount}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="treasury-history-summary">
+            <div className="supplier-ledger-active-pill">
+              <span>Résultat</span>
+              <strong>{filteredMovements.length} mouvement(s)</strong>
+            </div>
+            <div className="supplier-ledger-active-pill">
+              <span>Total visible</span>
+              <strong>{formatCurrency(filteredMovementAmount)}</strong>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={resetMovementFilters}
+              disabled={movementFilters.flow === 'all' && movementFilters.account === 'all'}
+            >
+              Réinitialiser les filtres
+            </button>
+          </div>
+        </div>
+        {movements.length === 0 ? (
+          <div className="alert-empty">Aucun mouvement de trésorerie.</div>
+        ) : (
+          <DataTable
+            columns={movementColumns}
+            data={filteredMovements}
+            rowKey="id"
+            searchPlaceholder="Rechercher un mouvement (compte, motif, type, statut)..."
+            initialSort={{ key: 'effective_at', direction: 'desc' }}
+            emptyMessage="Aucun mouvement ne correspond aux filtres sélectionnés."
+          />
+        )}
+      </div>
+
+      <div className="card">
         <h3 style={{ marginBottom: '10px' }}>Paiements clients récents</h3>
         <p className="form-hint" style={{ marginBottom: '10px' }}>
           Contrôle informatif des encaissements récents: seul le cash doit alimenter la caisse, les chèques et virements la banque, et le mobile money son compte dédié.
@@ -941,24 +1078,6 @@ const TreasuryManagement = () => {
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Historique de trésorerie</h3>
-        <p className="form-hint" style={{ marginBottom: '10px' }}>
-          Cet historique suit tous les comptes internes. Pour les seules sorties et validations liées à la caisse, utilise plutôt la page Mouvements de caisse.
-        </p>
-        {movements.length === 0 ? (
-          <div className="alert-empty">Aucun mouvement de trésorerie.</div>
-        ) : (
-          <DataTable
-            columns={movementColumns}
-            data={movements}
-            rowKey="id"
-            searchPlaceholder="Rechercher un mouvement (compte, motif, type, statut)..."
-            initialSort={{ key: 'effective_at', direction: 'desc' }}
-          />
         )}
       </div>
 
