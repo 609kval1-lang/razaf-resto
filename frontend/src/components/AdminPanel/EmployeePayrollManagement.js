@@ -719,63 +719,6 @@ const EmployeePayrollManagement = () => {
           </div>
 
           <div className="card">
-            <h3 style={{ marginBottom: '10px' }}>Profil salarial</h3>
-            <form onSubmit={submitSalaryProfile}>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Salaire mensuel (Ar)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={salaryForm.monthly_salary}
-                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, monthly_salary: event.target.value }))}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Jour de paiement</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={salaryForm.payment_day}
-                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, payment_day: event.target.value }))}
-                    placeholder="Ex: 30"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Profil actif</label>
-                  <select
-                    value={salaryForm.is_active ? '1' : '0'}
-                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, is_active: event.target.value === '1' }))}
-                  >
-                    <option value="1">Oui</option>
-                    <option value="0">Non</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Notes paie</label>
-                <textarea
-                  rows="2"
-                  value={salaryForm.notes}
-                  onChange={(event) => setSalaryForm((prev) => ({ ...prev, notes: event.target.value }))}
-                  placeholder="Ex: Paiement le dernier jour du mois"
-                />
-              </div>
-
-              <div className="form-actions">
-                <button className="btn btn-primary" type="submit" disabled={savingSalaryProfile}>
-                  {savingSalaryProfile ? 'Enregistrement...' : 'Enregistrer le profil salarial'}
-                </button>
-              </div>
-            </form>
-          </div>
-          <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
               <div>
                 <h3 style={{ marginBottom: '6px' }}>Action paie</h3>
@@ -1011,6 +954,64 @@ const EmployeePayrollManagement = () => {
               </form>
             </div>
           )}
+
+          <div className="card">
+            <h3 style={{ marginBottom: '10px' }}>Profil salarial</h3>
+            <form onSubmit={submitSalaryProfile}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Salaire mensuel (Ar)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={salaryForm.monthly_salary}
+                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, monthly_salary: event.target.value }))}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Jour de paiement</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={salaryForm.payment_day}
+                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, payment_day: event.target.value }))}
+                    placeholder="Ex: 30"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Profil actif</label>
+                  <select
+                    value={salaryForm.is_active ? '1' : '0'}
+                    onChange={(event) => setSalaryForm((prev) => ({ ...prev, is_active: event.target.value === '1' }))}
+                  >
+                    <option value="1">Oui</option>
+                    <option value="0">Non</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Notes paie</label>
+                <textarea
+                  rows="2"
+                  value={salaryForm.notes}
+                  onChange={(event) => setSalaryForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  placeholder="Ex: Paiement le dernier jour du mois"
+                />
+              </div>
+
+              <div className="form-actions">
+                <button className="btn btn-primary" type="submit" disabled={savingSalaryProfile}>
+                  {savingSalaryProfile ? 'Enregistrement...' : 'Enregistrer le profil salarial'}
+                </button>
+              </div>
+            </form>
+          </div>
 
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
