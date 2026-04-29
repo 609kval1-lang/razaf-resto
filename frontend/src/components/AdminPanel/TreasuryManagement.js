@@ -205,6 +205,7 @@ const TreasuryManagement = () => {
     flow: 'all',
     account: 'all',
   });
+  const [showMovementFilters, setShowMovementFilters] = useState(false);
   const [voucherSettlementForms, setVoucherSettlementForms] = useState({});
   const [transferForm, setTransferForm] = useState({
     amount: '',
@@ -391,6 +392,13 @@ const TreasuryManagement = () => {
   const filteredMovementAmount = useMemo(() => (
     filteredMovements.reduce((total, movement) => total + Number(movement.amount || 0), 0)
   ), [filteredMovements]);
+
+  const activeMovementFilterCount = useMemo(() => (
+    [
+      movementFilters.flow !== 'all',
+      movementFilters.account !== 'all',
+    ].filter(Boolean).length
+  ), [movementFilters.account, movementFilters.flow]);
 
   const resetMovementFilters = () => {
     setMovementFilters({
@@ -951,79 +959,92 @@ const TreasuryManagement = () => {
       </div>
 
       <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Historique de trésorerie</h3>
+        <div className="section-header-inline">
+          <h3 style={{ marginBottom: 0 }}>Historique de trésorerie</h3>
+          <button
+            type="button"
+            className={`btn btn-sm ${showMovementFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
+            onClick={() => setShowMovementFilters((previous) => !previous)}
+          >
+            <span aria-hidden="true">{showMovementFilters ? '▾' : '▸'}</span>
+            <span>{showMovementFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
+            {activeMovementFilterCount > 0 ? <strong>{activeMovementFilterCount}</strong> : null}
+          </button>
+        </div>
         <p className="form-hint" style={{ marginBottom: '10px' }}>
           Cet historique suit tous les comptes internes. Pour les seules sorties et validations liées à la caisse, utilise plutôt la page Mouvements de caisse.
         </p>
-        <div className="treasury-history-toolbar">
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Famille de flux</span>
-            <div className="treasury-filter-toggles">
-              {MOVEMENT_FLOW_FILTERS.map((option) => {
-                const optionCount = option.value === 'all'
-                  ? movements.length
-                  : movements.filter((movement) => option.flowTypes.includes(String(movement.flow_type || ''))).length;
+        {showMovementFilters ? (
+          <div className="treasury-history-toolbar">
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Famille de flux</span>
+              <div className="treasury-filter-toggles">
+                {MOVEMENT_FLOW_FILTERS.map((option) => {
+                  const optionCount = option.value === 'all'
+                    ? movements.length
+                    : movements.filter((movement) => option.flowTypes.includes(String(movement.flow_type || ''))).length;
 
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`treasury-filter-toggle ${movementFilters.flow === option.value ? 'is-active' : ''}`}
-                    onClick={() => setMovementFilters((previous) => ({ ...previous, flow: option.value }))}
-                  >
-                    <span>{option.label}</span>
-                    <strong>{optionCount}</strong>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`treasury-filter-toggle ${movementFilters.flow === option.value ? 'is-active' : ''}`}
+                      onClick={() => setMovementFilters((previous) => ({ ...previous, flow: option.value }))}
+                    >
+                      <span>{option.label}</span>
+                      <strong>{optionCount}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Compte concerné</span>
+              <div className="treasury-filter-toggles">
+                {movementAccountFilterOptions.map((option) => {
+                  const optionCount = option.value === 'all'
+                    ? movements.length
+                    : movements.filter((movement) => (
+                      String(movement.source_account || '') === option.value
+                      || String(movement.destination_account || '') === option.value
+                    )).length;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`treasury-filter-toggle ${movementFilters.account === option.value ? 'is-active' : ''}`}
+                      onClick={() => setMovementFilters((previous) => ({ ...previous, account: option.value }))}
+                    >
+                      <span>{option.label}</span>
+                      <strong>{optionCount}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="treasury-history-summary">
+              <div className="supplier-ledger-active-pill">
+                <span>Résultat</span>
+                <strong>{filteredMovements.length} mouvement(s)</strong>
+              </div>
+              <div className="supplier-ledger-active-pill">
+                <span>Total visible</span>
+                <strong>{formatCurrency(filteredMovementAmount)}</strong>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={resetMovementFilters}
+                disabled={movementFilters.flow === 'all' && movementFilters.account === 'all'}
+              >
+                Réinitialiser les filtres
+              </button>
             </div>
           </div>
-
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Compte concerné</span>
-            <div className="treasury-filter-toggles">
-              {movementAccountFilterOptions.map((option) => {
-                const optionCount = option.value === 'all'
-                  ? movements.length
-                  : movements.filter((movement) => (
-                    String(movement.source_account || '') === option.value
-                    || String(movement.destination_account || '') === option.value
-                  )).length;
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`treasury-filter-toggle ${movementFilters.account === option.value ? 'is-active' : ''}`}
-                    onClick={() => setMovementFilters((previous) => ({ ...previous, account: option.value }))}
-                  >
-                    <span>{option.label}</span>
-                    <strong>{optionCount}</strong>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="treasury-history-summary">
-            <div className="supplier-ledger-active-pill">
-              <span>Résultat</span>
-              <strong>{filteredMovements.length} mouvement(s)</strong>
-            </div>
-            <div className="supplier-ledger-active-pill">
-              <span>Total visible</span>
-              <strong>{formatCurrency(filteredMovementAmount)}</strong>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={resetMovementFilters}
-              disabled={movementFilters.flow === 'all' && movementFilters.account === 'all'}
-            >
-              Réinitialiser les filtres
-            </button>
-          </div>
-        </div>
+        ) : null}
         {movements.length === 0 ? (
           <div className="alert-empty">Aucun mouvement de trésorerie.</div>
         ) : (

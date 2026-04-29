@@ -410,6 +410,15 @@
   text-align: right;
 }
 
+.revenue-dashboard-section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 340px;
+  flex-wrap: wrap;
+}
+
 .quick-actions {
   display: flex;
   gap: 10px;
@@ -1213,6 +1222,33 @@
   justify-content: space-between;
 }
 
+.section-header-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.filter-toggle-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-toggle-inline strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.12);
+  color: inherit;
+  font-size: 0.74rem;
+}
+
 @media (max-width: 900px) {
   .supplier-bulk-settlement-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1227,6 +1263,10 @@
   }
 
   .treasury-history-summary {
+    justify-content: flex-start;
+  }
+
+  .revenue-dashboard-section-actions {
     justify-content: flex-start;
   }
 }

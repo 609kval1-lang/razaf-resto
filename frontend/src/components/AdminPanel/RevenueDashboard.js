@@ -195,6 +195,7 @@ const RevenueDashboard = () => {
   const [rankingMetric, setRankingMetric] = useState('demand');
   const [rankingView, setRankingView] = useState('top');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [showRankingFilters, setShowRankingFilters] = useState(false);
   const [report, setReport] = useState(defaultReport);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
   const [priceEditValue, setPriceEditValue] = useState('');
@@ -596,6 +597,17 @@ const RevenueDashboard = () => {
     { value: 'worst', label: selectedMetricConfig.worstTitle },
   ];
 
+  const activeRankingFilterCount = useMemo(() => (
+    [
+      scope !== 'rolling_week',
+      selectedUserId !== 'all',
+      topLimit !== 5,
+      rankingMetric !== 'demand',
+      rankingView !== 'top',
+      selectedCategory !== 'all',
+    ].filter(Boolean).length
+  ), [rankingMetric, rankingView, scope, selectedCategory, selectedUserId, topLimit]);
+
   const menuImpactSummary = useMemo(() => {
     return filteredMenuPricingImpact.reduce((acc, row) => {
       const action = String(row?.recommended_action || '');
@@ -795,123 +807,136 @@ const RevenueDashboard = () => {
       <div className="card">
         <div className="revenue-dashboard-section-header">
           <h3>📦 Détail du classement · {unifiedRankingTitle}{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
-          <div className="form-hint revenue-dashboard-section-meta">
-            Vue: <strong>{report?.filters?.scope_label || scopeLabel(scope)}</strong> · Utilisateur: <strong>{selectedUserLabel}</strong> · Intervalle analysé: du <strong>{formatDateTime(report?.filters?.from)}</strong> au <strong>{formatDateTime(report?.filters?.to)}</strong>
+          <div className="revenue-dashboard-section-actions">
+            <div className="form-hint revenue-dashboard-section-meta">
+              Vue: <strong>{report?.filters?.scope_label || scopeLabel(scope)}</strong> · Utilisateur: <strong>{selectedUserLabel}</strong> · Intervalle analysé: du <strong>{formatDateTime(report?.filters?.from)}</strong> au <strong>{formatDateTime(report?.filters?.to)}</strong>
+            </div>
+            <button
+              type="button"
+              className={`btn btn-sm ${showRankingFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
+              onClick={() => setShowRankingFilters((previous) => !previous)}
+            >
+              <span aria-hidden="true">{showRankingFilters ? '▾' : '▸'}</span>
+              <span>{showRankingFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
+              {activeRankingFilterCount > 0 ? <strong>{activeRankingFilterCount}</strong> : null}
+            </button>
           </div>
         </div>
-        <div className="revenue-ranking-toolbar">
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Période</span>
-            <div className="treasury-filter-toggles">
-              {SCOPE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`treasury-filter-toggle ${scope === option.value ? 'is-active' : ''}`}
-                  onClick={() => setScope(option.value)}
-                >
-                  <span>{option.label}</span>
-                </button>
-              ))}
+        {showRankingFilters ? (
+          <div className="revenue-ranking-toolbar">
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Période</span>
+              <div className="treasury-filter-toggles">
+                {SCOPE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`treasury-filter-toggle ${scope === option.value ? 'is-active' : ''}`}
+                    onClick={() => setScope(option.value)}
+                  >
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Utilisateur</span>
-            <div className="treasury-filter-toggles">
-              <button
-                type="button"
-                className={`treasury-filter-toggle ${selectedUserId === 'all' ? 'is-active' : ''}`}
-                onClick={() => setSelectedUserId('all')}
-              >
-                <span>Tous les utilisateurs</span>
-              </button>
-              {users.map((user) => (
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Utilisateur</span>
+              <div className="treasury-filter-toggles">
                 <button
-                  key={user.id}
                   type="button"
-                  className={`treasury-filter-toggle ${selectedUserId === String(user.id) ? 'is-active' : ''}`}
-                  onClick={() => setSelectedUserId(String(user.id))}
+                  className={`treasury-filter-toggle ${selectedUserId === 'all' ? 'is-active' : ''}`}
+                  onClick={() => setSelectedUserId('all')}
                 >
-                  <span>{user.name} ({user.role})</span>
+                  <span>Tous les utilisateurs</span>
                 </button>
-              ))}
+                {users.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    className={`treasury-filter-toggle ${selectedUserId === String(user.id) ? 'is-active' : ''}`}
+                    onClick={() => setSelectedUserId(String(user.id))}
+                  >
+                    <span>{user.name} ({user.role})</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Taille du top</span>
-            <div className="treasury-filter-toggles">
-              {TOP_OPTIONS.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`treasury-filter-toggle ${topLimit === option ? 'is-active' : ''}`}
-                  onClick={() => setTopLimit(option)}
-                >
-                  <span>Top {option}</span>
-                </button>
-              ))}
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Taille du top</span>
+              <div className="treasury-filter-toggles">
+                {TOP_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`treasury-filter-toggle ${topLimit === option ? 'is-active' : ''}`}
+                    onClick={() => setTopLimit(option)}
+                  >
+                    <span>Top {option}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Indicateur</span>
-            <div className="treasury-filter-toggles">
-              {Object.entries(rankingMetricConfig).map(([metricKey, metricConfig]) => (
-                <button
-                  key={metricKey}
-                  type="button"
-                  className={`treasury-filter-toggle ${rankingMetric === metricKey ? 'is-active' : ''}`}
-                  onClick={() => setRankingMetric(metricKey)}
-                >
-                  <span>{metricConfig.label}</span>
-                </button>
-              ))}
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Indicateur</span>
+              <div className="treasury-filter-toggles">
+                {Object.entries(rankingMetricConfig).map(([metricKey, metricConfig]) => (
+                  <button
+                    key={metricKey}
+                    type="button"
+                    className={`treasury-filter-toggle ${rankingMetric === metricKey ? 'is-active' : ''}`}
+                    onClick={() => setRankingMetric(metricKey)}
+                  >
+                    <span>{metricConfig.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Vue classement</span>
-            <div className="treasury-filter-toggles">
-              {rankingViewOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`treasury-filter-toggle ${rankingView === option.value ? 'is-active' : ''}`}
-                  onClick={() => setRankingView(option.value)}
-                >
-                  <span>{option.label}</span>
-                </button>
-              ))}
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Vue classement</span>
+              <div className="treasury-filter-toggles">
+                {rankingViewOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`treasury-filter-toggle ${rankingView === option.value ? 'is-active' : ''}`}
+                    onClick={() => setRankingView(option.value)}
+                  >
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="treasury-filter-block">
-            <span className="treasury-filter-label">Catégorie</span>
-            <div className="treasury-filter-toggles">
-              <button
-                type="button"
-                className={`treasury-filter-toggle ${selectedCategory === 'all' ? 'is-active' : ''}`}
-                onClick={() => setSelectedCategory('all')}
-              >
-                <span>Toutes catégories</span>
-                <strong>{categoryRowCounts.all || 0}</strong>
-              </button>
-              {categoryOptions.map((option) => (
+            <div className="treasury-filter-block">
+              <span className="treasury-filter-label">Catégorie</span>
+              <div className="treasury-filter-toggles">
                 <button
-                  key={option.key}
                   type="button"
-                  className={`treasury-filter-toggle ${selectedCategory === option.key ? 'is-active' : ''}`}
-                  onClick={() => setSelectedCategory(option.key)}
+                  className={`treasury-filter-toggle ${selectedCategory === 'all' ? 'is-active' : ''}`}
+                  onClick={() => setSelectedCategory('all')}
                 >
-                  <span>{option.label}</span>
-                  <strong>{categoryRowCounts[option.key] || 0}</strong>
+                  <span>Toutes catégories</span>
+                  <strong>{categoryRowCounts.all || 0}</strong>
                 </button>
-              ))}
+                {categoryOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`treasury-filter-toggle ${selectedCategory === option.key ? 'is-active' : ''}`}
+                    onClick={() => setSelectedCategory(option.key)}
+                  >
+                    <span>{option.label}</span>
+                    <strong>{categoryRowCounts[option.key] || 0}</strong>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
         <DataTable
           columns={unifiedRankingColumns}
           data={unifiedRankingRows}
