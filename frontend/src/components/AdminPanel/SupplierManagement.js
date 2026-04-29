@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import { RAW_MATERIAL_UNIT_OPTIONS } from '../../utils/units';
 import { normalizePaymentMethod } from '../../utils/paymentMethods';
@@ -20,6 +20,9 @@ const DEFAULT_TREASURY_BALANCES = {
   bank: 0,
   mobile_money: 0,
 };
+
+const SUPPLIER_FOLLOW_SCROLL_EXTRA_Y = 0;
+const SUPPLIER_FOLLOW_FOCUS_PARAM = 'supplier-payments';
 
 const formatCurrency = (value) => {
   const amount = Number(value || 0);
@@ -270,6 +273,7 @@ const applySupplierSettlementSelection = (value, previous = {}) => {
 
 const SupplierManagement = () => {
   const { confirm } = useDialog();
+  const location = useLocation();
   const [suppliers, setSuppliers] = useState([]);
   const [rawMaterials, setRawMaterials] = useState([]);
   const [alertsData, setAlertsData] = useState({ summary: {}, alerts: [] });
@@ -286,6 +290,9 @@ const SupplierManagement = () => {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerReloadToken, setLedgerReloadToken] = useState(0);
   const followSectionRef = useRef(null);
+  const followHeadingRef = useRef(null);
+  const followScrollPendingRef = useRef(false);
+  const routeFollowScrollHandledRef = useRef('');
   const [focusedPurchaseId, setFocusedPurchaseId] = useState(null);
   const [treasuryBalances, setTreasuryBalances] = useState(DEFAULT_TREASURY_BALANCES);
 
@@ -306,6 +313,10 @@ const SupplierManagement = () => {
     [alertsData],
   );
   const groupedAlerts = useMemo(() => buildGroupedSupplierAlerts(alerts), [alerts]);
+  const shouldFocusSupplierPayments = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('focus') === SUPPLIER_FOLLOW_FOCUS_PARAM;
+  }, [location.search]);
   const purchases = useMemo(
     () => (Array.isArray(ledger?.purchases) ? ledger.purchases : []),
     [ledger],
@@ -337,6 +348,27 @@ const SupplierManagement = () => {
   const bulkSettlementConfig = getSupplierSettlementConfig(bulkSettlementValue);
   const bulkDebitAccountLabel = bulkSettlementConfig.debit_account_label;
   const bulkDebitAccountBalance = Number(treasuryBalances?.[bulkSettlementConfig.debit_account] || 0);
+
+  const scrollToSupplierFollow = useCallback(() => {
+    const target = followHeadingRef.current || followSectionRef.current;
+    if (!target) return;
+
+    const targetY = target.getBoundingClientRect().top + window.scrollY + SUPPLIER_FOLLOW_SCROLL_EXTRA_Y;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
+  }, []);
+
+  const scrollToSupplierFollowAfterRender = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        scrollToSupplierFollow();
+        followScrollPendingRef.current = false;
+      });
+    });
+  }, [scrollToSupplierFollow]);
+
+  const queueSupplierFollowScroll = useCallback(() => {
+    followScrollPendingRef.current = true;
+  }, []);
 
   const primePaymentForm = (purchaseId, amount = '') => {
     const normalizedPurchaseId = Number(purchaseId);
@@ -374,9 +406,7 @@ const SupplierManagement = () => {
       primePaymentForm(nextPurchaseId, nextRemainingAmount);
     }
 
-    if (followSectionRef.current) {
-      followSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    queueSupplierFollowScroll();
   };
 
   const supplierColumns = [
@@ -668,6 +698,9 @@ const SupplierManagement = () => {
       setLedger(null);
     } finally {
       setLedgerLoading(false);
+      if (followScrollPendingRef.current) {
+        scrollToSupplierFollowAfterRender();
+      }
     }
   };
 
@@ -680,6 +713,29 @@ const SupplierManagement = () => {
     if (activeSupplierId) loadLedger(activeSupplierId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSupplierId, ledgerReloadToken]);
+
+  useEffect(() => {
+    if (!shouldFocusSupplierPayments || !activeSupplierId) return;
+
+    const focusKey = `${location.pathname}${location.search}`;
+    if (routeFollowScrollHandledRef.current === focusKey) return;
+
+    routeFollowScrollHandledRef.current = focusKey;
+    setFocusedPurchaseId(null);
+    setActiveSupplierPaymentAction('outstanding_debts');
+    queueSupplierFollowScroll();
+    if (ledger) {
+      scrollToSupplierFollowAfterRender();
+    }
+  }, [
+    activeSupplierId,
+    ledger,
+    location.pathname,
+    location.search,
+    queueSupplierFollowScroll,
+    scrollToSupplierFollowAfterRender,
+    shouldFocusSupplierPayments,
+  ]);
 
   const resetForm = () => {
     setFormData({ name: '', email: '', phone: '', raw_material_ids: [] });
@@ -1089,7 +1145,7 @@ const SupplierManagement = () => {
 
       <div className="card" ref={followSectionRef}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-          <h3>Suivi Paiement Fournisseur</h3>
+          <h3 ref={followHeadingRef}>Suivi Paiement Fournisseur</h3>
           <select
             className="admin-select"
             value={activeSupplierId}

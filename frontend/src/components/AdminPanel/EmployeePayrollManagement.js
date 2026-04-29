@@ -40,6 +40,7 @@ const defaultSnapshot = {
   },
 };
 const PAYROLL_REFRESH_INTERVAL_MS = 5000;
+const EMPLOYEE_MANAGE_SCROLL_EXTRA_Y = 0;
 
 const formatCurrency = (value) => {
   const amount = Number(value || 0);
@@ -194,6 +195,8 @@ const EmployeePayrollManagement = () => {
   const [savingSalaryPayment, setSavingSalaryPayment] = useState(false);
   const [activePayrollAction, setActivePayrollAction] = useState('advance');
   const [transactionHistoryFilter, setTransactionHistoryFilter] = useState('all');
+  const managedEmployeeHeadingRef = useRef(null);
+  const managedEmployeeScrollPendingRef = useRef(false);
   const previousSelectedEmployeeIdRef = useRef(null);
 
   const loadSnapshotInternal = useCallback(async (options = {}) => {
@@ -357,6 +360,36 @@ const EmployeePayrollManagement = () => {
   const advanceSourceAvailableBalance = Number((snapshot?.treasury_balances || {})[advanceSourceAccount] || 0);
   const salarySourceAvailableBalance = Number((snapshot?.treasury_balances || {})[salarySourceAccount] || 0);
 
+  const scrollToManagedEmployee = useCallback(() => {
+    const target = managedEmployeeHeadingRef.current;
+    if (!target) return;
+
+    const targetY = target.getBoundingClientRect().top + window.scrollY + EMPLOYEE_MANAGE_SCROLL_EXTRA_Y;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
+  }, []);
+
+  const scrollToManagedEmployeeAfterRender = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        scrollToManagedEmployee();
+        managedEmployeeScrollPendingRef.current = false;
+      });
+    });
+  }, [scrollToManagedEmployee]);
+
+  const handleManageEmployee = useCallback((employeeId) => {
+    managedEmployeeScrollPendingRef.current = true;
+    setSelectedEmployeeId(employeeId);
+    if (employeeId === selectedEmployeeId) {
+      scrollToManagedEmployeeAfterRender();
+    }
+  }, [scrollToManagedEmployeeAfterRender, selectedEmployeeId]);
+
+  useEffect(() => {
+    if (!managedEmployeeScrollPendingRef.current || !selectedEmployee) return;
+    scrollToManagedEmployeeAfterRender();
+  }, [scrollToManagedEmployeeAfterRender, selectedEmployee]);
+
   const employeeColumns = [
     {
       key: 'name',
@@ -419,7 +452,7 @@ const EmployeePayrollManagement = () => {
         <button
           type="button"
           className={`btn btn-sm ${employee.id === selectedEmployeeId ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setSelectedEmployeeId(employee.id)}
+          onClick={() => handleManageEmployee(employee.id)}
         >
           {employee.id === selectedEmployeeId ? 'Sélectionné' : 'Gérer'}
         </button>
@@ -654,7 +687,7 @@ const EmployeePayrollManagement = () => {
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
               <div>
-                <h3>{selectedEmployee.name}</h3>
+                <h3 ref={managedEmployeeHeadingRef}>{selectedEmployee.name}</h3>
                 <p className="form-hint" style={{ marginTop: '6px' }}>
                   {resolveDisplayedJobTitle(selectedEmployee)} · {selectedEmployee.has_system_access ? 'Avec accès écran' : 'Employé simple'} · Statut {selectedEmployee.employment_status === 'inactive' ? 'inactif' : 'actif'}
                 </p>

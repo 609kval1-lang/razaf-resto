@@ -384,7 +384,7 @@ const AdminDashboard = () => {
             <p>Stocks en alerte à vérifier</p>
           </Link>
 
-          <Link to="/admin/suppliers" className="dashboard-alert-card supplier-warning">
+          <Link to="/admin/suppliers?focus=supplier-payments" className="dashboard-alert-card supplier-warning">
             <span className="dashboard-alert-label">Echeances fournisseurs</span>
             <strong className="dashboard-alert-number">{supplierFollowUpCount}</strong>
             <div className="dashboard-alert-split">
