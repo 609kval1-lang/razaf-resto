@@ -110,6 +110,12 @@ class CashMovementController extends Controller
                 ]);
             }
 
+            if ($locked->source_account !== CashMovement::ACCOUNT_CASH) {
+                throw ValidationException::withMessages([
+                    'movement' => ['Cette validation est réservée aux sorties qui débitent réellement la caisse.'],
+                ]);
+            }
+
             $available = $this->cashAvailableAmount(true);
             $amount = round((float) $locked->amount, 2);
             if ($amount > $available) {

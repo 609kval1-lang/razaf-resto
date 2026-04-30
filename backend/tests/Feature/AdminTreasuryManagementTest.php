@@ -258,4 +258,139 @@ class AdminTreasuryManagementTest extends TestCase
             (float) $treasury->json('summary.accounts.cash.balance')
         );
     }
+
+    public function test_daily_cash_out_reconciliation_only_counts_movements_that_debit_cash(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $cashier = User::factory()->create(['role' => 'cashier']);
+
+        CashMovement::query()->create([
+            'direction' => 'in',
+            'status' => 'approved',
+            'movement_type' => 'sale',
+            'flow_type' => 'customer_payment',
+            'amount' => 30000,
+            'payment_method' => 'cash',
+            'destination_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Base caisse',
+            'reason' => 'Encaissement cash',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        $cashOutToday = CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'cash_withdrawal',
+            'amount' => 2500,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Sortie caisse du jour',
+            'reason' => 'Achat urgent',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        $cashOutYesterday = CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'cash_withdrawal',
+            'amount' => 1000,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Sortie caisse ancienne',
+            'reason' => 'Ancienne sortie',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now()->subDay(),
+        ]);
+
+        $safeOutToday = CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'treasury_withdrawal',
+            'amount' => 4000,
+            'payment_method' => null,
+            'source_account' => CashMovement::ACCOUNT_SAFE,
+            'description' => 'Sortie coffre du jour',
+            'reason' => 'Sortie non caisse',
+            'requested_by_user_id' => $admin->id,
+            'approved_by_user_id' => $admin->id,
+            'approved_at' => now(),
+        ]);
+
+        CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'pending',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'cash_withdrawal_request',
+            'amount' => 700,
+            'payment_method' => 'cash',
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Sortie en attente',
+            'reason' => 'A valider',
+            'requested_by_user_id' => $cashier->id,
+        ]);
+
+        Sanctum::actingAs($cashier);
+
+        $cashierMovements = $this->getJson('/api/cashier/cash-movements');
+        $cashierMovements->assertOk()
+            ->assertJsonPath('summary.cash_out_approved', 2500)
+            ->assertJsonPath('summary.cash_out_pending', 700);
+
+        $cashierMovementIds = collect($cashierMovements->json('movements'))->pluck('id');
+        $this->assertTrue($cashierMovementIds->contains((int) $cashOutToday->id));
+        $this->assertFalse($cashierMovementIds->contains((int) $cashOutYesterday->id));
+        $this->assertFalse($cashierMovementIds->contains((int) $safeOutToday->id));
+
+        $visibleApprovedCashOut = collect($cashierMovements->json('movements'))
+            ->filter(fn (array $movement) => $movement['status'] === 'approved'
+                && $movement['direction'] === 'out'
+                && $movement['source_account'] === CashMovement::ACCOUNT_CASH)
+            ->sum('amount');
+
+        $this->assertSame(2500.0, round((float) $visibleApprovedCashOut, 2));
+
+        Sanctum::actingAs($admin);
+
+        $adminCash = $this->getJson('/api/admin/cash-movements');
+        $adminCash->assertOk()
+            ->assertJsonPath('summary.exits_today', 2500)
+            ->assertJsonPath('summary.cash_out_approved', 3500);
+    }
+
+    public function test_cash_admin_approval_rejects_pending_outflows_that_do_not_debit_cash(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Sanctum::actingAs($admin);
+
+        $safeOut = CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'pending',
+            'movement_type' => 'withdrawal',
+            'flow_type' => 'treasury_withdrawal',
+            'amount' => 500,
+            'payment_method' => null,
+            'source_account' => CashMovement::ACCOUNT_SAFE,
+            'description' => 'Sortie coffre en attente',
+            'reason' => 'Ne doit pas passer par validation caisse',
+            'requested_by_user_id' => $admin->id,
+        ]);
+
+        $this->postJson("/api/admin/cash-movements/{$safeOut->id}/approve")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('movement');
+
+        $this->assertDatabaseHas('cash_movements', [
+            'id' => $safeOut->id,
+            'status' => 'pending',
+            'source_account' => CashMovement::ACCOUNT_SAFE,
+        ]);
+    }
 }

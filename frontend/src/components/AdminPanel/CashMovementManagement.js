@@ -318,12 +318,12 @@ const CashMovementManagement = () => {
       ),
     },
     {
-      key: 'created_at',
-      header: 'Date création',
+      key: 'effective_at',
+      header: 'Date validation',
       sortType: 'date',
-      sortAccessor: (movement) => movement.created_at,
-      searchAccessor: (movement) => formatDateTime(movement.created_at),
-      render: (movement) => formatDateTime(movement.created_at),
+      sortAccessor: (movement) => movement.effective_at || movement.created_at,
+      searchAccessor: (movement) => formatDateTime(movement.effective_at || movement.created_at),
+      render: (movement) => formatDateTime(movement.effective_at || movement.created_at),
     },
   ];
 
@@ -364,14 +364,14 @@ const CashMovementManagement = () => {
             <p>Entrees cash - sorties validées</p>
           </div>
           <div className="stat-card">
-            <h3>Entrees cash validées</h3>
-            <div className="stat-number">{formatCurrency(summary.cash_in_approved)}</div>
-            <p>Historique cumulé</p>
+            <h3>Entrees cash (jour)</h3>
+            <div className="stat-number">{formatCurrency(summary.entries_today)}</div>
+            <p>Cash entré aujourd&apos;hui</p>
           </div>
           <div className="stat-card">
-            <h3>Sorties validées</h3>
-            <div className="stat-number">{formatCurrency(summary.cash_out_approved)}</div>
-            <p>Historique cumulé</p>
+            <h3>Sorties validées (jour)</h3>
+            <div className="stat-number">{formatCurrency(summary.exits_today)}</div>
+            <p>Sorties qui débitent réellement la caisse</p>
           </div>
           <div className="stat-card">
             <h3>Sorties en attente</h3>
@@ -432,7 +432,7 @@ const CashMovementManagement = () => {
             data={movements}
             rowKey="id"
             searchPlaceholder="Rechercher un mouvement (type, motif, description, demandeur)..."
-            initialSort={{ key: 'created_at', direction: 'desc' }}
+            initialSort={{ key: 'effective_at', direction: 'desc' }}
           />
         )}
       </div>
