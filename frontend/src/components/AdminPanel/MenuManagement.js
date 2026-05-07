@@ -13,6 +13,8 @@ const formatAr = (value) => {
   })} Ar`;
 };
 
+const roundAriary = (value) => Math.round(Number(value || 0) + Number.EPSILON);
+
 const normalizeText = (value) => String(value || '')
   .toLowerCase()
   .normalize('NFD')
@@ -124,7 +126,7 @@ const MenuManagement = () => {
     const payload = new FormData();
     payload.append('name', String(formData.name || '').trim());
     payload.append('description', String(formData.description || '').trim());
-    payload.append('price', String(formData.price ?? 0));
+    payload.append('price', String(Math.max(0, roundAriary(formData.price))));
     payload.append('category', String(formData.category || 'main'));
     payload.append('is_available', formData.is_available ? '1' : '0');
 
@@ -259,7 +261,7 @@ const MenuManagement = () => {
     setFormData({
       name: menu.name,
       description: menu.description,
-      price: menu.price,
+      price: roundAriary(menu.price),
       category: menu.category === 'starter' ? 'entree' : menu.category,
       image_url: menu.image_url || '',
       is_available: menu.is_available ?? true,
@@ -773,10 +775,10 @@ const MenuManagement = () => {
                   <input
                     type="number"
                     value={formData.price}
-                    onChange={(e) => setFormData({...formData, price: parseFloat(e.target.value)})}
+                    onChange={(e) => setFormData({ ...formData, price: Math.max(0, roundAriary(e.target.value)) })}
                     required
                     min="0"
-                    step="0.01"
+                    step="1"
                   />
                 </div>
 

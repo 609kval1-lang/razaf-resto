@@ -35,6 +35,8 @@ const formatCurrency = (value) => {
   })} Ar`;
 };
 
+const roundAriary = (value) => Math.round(Number(value || 0) + Number.EPSILON);
+
 const LOCAL_DATETIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/;
 
 const parseDateTimeValue = (value) => {
@@ -938,7 +940,7 @@ export const ServerOrdersModule = () => {
   const isTakeawayOrder = form.order_type === 'takeaway';
   const isAppendMode = !isTakeawayOrder && form.order_action === 'append';
   const packagingQuantity = Math.max(0, Number(form.packaging_quantity || 0));
-  const packagingUnitPrice = Math.max(0, Number(form.packaging_unit_price || 0));
+  const packagingUnitPrice = Math.max(0, roundAriary(form.packaging_unit_price || 0));
   const packagingCartQuantity = Math.max(0, Math.trunc(packagingQuantity));
   const packagingTotal = isTakeawayOrder && form.with_packaging
     ? packagingQuantity * packagingUnitPrice
@@ -1321,27 +1323,6 @@ export const ServerOrdersModule = () => {
     }));
   }, [form.order_action, isTakeawayOrder]);
 
-  useEffect(() => {
-    if (!selectedCustomer) {
-      return;
-    }
-
-    const contextNote = buildCustomerContextNote(selectedCustomer);
-    const customerAllergies = String(selectedCustomer?.allergies || '').trim();
-    const customerPreferredCooking = String(selectedCustomer?.preferred_cooking || '').trim();
-
-    setForm((previous) => ({
-      ...previous,
-      allergies: String(previous.allergies || '').trim() ? previous.allergies : customerAllergies,
-      preferred_cooking: String(previous.preferred_cooking || '').trim()
-        ? previous.preferred_cooking
-        : customerPreferredCooking,
-      special_requests: String(previous.special_requests || '').trim()
-        ? previous.special_requests
-        : contextNote,
-    }));
-  }, [selectedCustomer]);
-
   const groupedMenus = useMemo(() => {
     const buckets = new Map();
 
@@ -1409,7 +1390,7 @@ export const ServerOrdersModule = () => {
         return {
           menu,
           quantity: safeQuantity,
-          lineTotal: Number(menu.price || 0) * safeQuantity,
+          lineTotal: roundAriary(menu.price || 0) * safeQuantity,
         };
       })
       .filter(Boolean)
@@ -1531,7 +1512,7 @@ export const ServerOrdersModule = () => {
       append_to_existing: !isTakeawayOrder && form.order_action === 'append',
       with_packaging: isTakeawayOrder ? Boolean(form.with_packaging) : false,
       packaging_quantity: isTakeawayOrder && form.with_packaging ? Math.trunc(packagingQuantity) : 0,
-      packaging_unit_price: isTakeawayOrder && form.with_packaging ? Number(packagingUnitPrice.toFixed(2)) : 0,
+      packaging_unit_price: isTakeawayOrder && form.with_packaging ? roundAriary(packagingUnitPrice) : 0,
       table_id: !isTakeawayOrder && form.table_id ? Number(form.table_id) : null,
       customer_id: form.customer_id ? Number(form.customer_id) : null,
       customer_name: !form.customer_id && customerName ? customerName : null,
@@ -1623,7 +1604,6 @@ export const ServerOrdersModule = () => {
     }
 
     setSubmitting(true);
-    const selectedCustomerId = form.customer_id ? Number(form.customer_id) : null;
     const handleCreatedOrder = (response) => {
       const hasStockWarning = Boolean(response?.data?.stock_warnings?.has_shortage);
       const appendedToExisting = Boolean(response?.data?.appended_to_existing);
@@ -1651,9 +1631,10 @@ export const ServerOrdersModule = () => {
         with_packaging: false,
         packaging_quantity: '1',
         packaging_unit_price: '0',
+        customer_id: '',
         customer_name: '',
-        preferred_cooking: previous.customer_id ? previous.preferred_cooking : '',
-        allergies: previous.customer_id ? previous.allergies : '',
+        preferred_cooking: '',
+        allergies: '',
         special_requests: '',
         is_urgent: false,
       }));
@@ -1661,9 +1642,6 @@ export const ServerOrdersModule = () => {
       // Garder les mêmes flux de refresh, mais sans bloquer le bouton "Envoi..."
       // pour éviter l'impression de lag.
       void loadData({ silent: true });
-      if (selectedCustomerId) {
-        void loadCustomerInsights(selectedCustomerId);
-      }
     };
 
     const confirmMissingIngredientsAndRetry = async (
@@ -2204,7 +2182,7 @@ export const ServerOrdersModule = () => {
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="1"
                   value={form.packaging_unit_price}
                   onChange={(event) => setForm((prev) => ({ ...prev, packaging_unit_price: event.target.value }))}
                   placeholder="Ex: 500"
@@ -2220,12 +2198,14 @@ export const ServerOrdersModule = () => {
               onChange={(event) => {
                 const nextCustomerId = event.target.value;
                 const selected = customers.find((customer) => Number(customer.id) === Number(nextCustomerId));
+                const hasSelectedCustomer = Boolean(nextCustomerId && selected);
                 setForm((prev) => ({
                   ...prev,
                   customer_id: nextCustomerId,
-                  customer_name: nextCustomerId ? '' : prev.customer_name,
-                  allergies: nextCustomerId ? String(selected?.allergies || '') : prev.allergies,
-                  preferred_cooking: nextCustomerId ? String(selected?.preferred_cooking || '') : prev.preferred_cooking,
+                  customer_name: '',
+                  allergies: hasSelectedCustomer ? String(selected?.allergies || '') : '',
+                  preferred_cooking: hasSelectedCustomer ? String(selected?.preferred_cooking || '') : '',
+                  special_requests: hasSelectedCustomer ? buildCustomerContextNote(selected) : '',
                 }));
               }}
             >

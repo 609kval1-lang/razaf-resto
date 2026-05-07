@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Http\Controllers\Controller;
 use App\Services\TreasuryService;
+use App\Support\Ariary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -117,6 +118,10 @@ class CashierController extends Controller
             });
         }
 
+        $orders->each(function (Order $order) {
+            $this->normalizeOrderAmounts($order);
+        });
+
         return response()->json($orders);
     }
 
@@ -172,17 +177,17 @@ class CashierController extends Controller
                     $lockedOrder->customer_id = $customerId;
                 }
 
-                $grossAmount = round((float) $lockedOrder->total_amount, 2);
-                $discountAmount = round(($grossAmount * $discountPercent) / 100, 2);
-                $finalAmount = round(max(0, $grossAmount - $discountAmount), 2);
+                $grossAmount = Ariary::round($lockedOrder->total_amount);
+                $discountAmount = Ariary::round(($grossAmount * $discountPercent) / 100);
+                $finalAmount = Ariary::round(max(0, $grossAmount - $discountAmount));
                 $hasCompletedPayments = $lockedOrder->payments()
                     ->where('status', 'completed')
                     ->exists();
 
                 if ($payment && $hasCompletedPayments) {
                     $discountPercent = (int) ($payment->discount_percent ?? $discountPercent);
-                    $discountAmount = round((float) ($payment->discount_amount ?? $discountAmount), 2);
-                    $finalAmount = round((float) ($payment->amount ?? $finalAmount), 2);
+                    $discountAmount = Ariary::round($payment->discount_amount ?? $discountAmount);
+                    $finalAmount = Ariary::round($payment->amount ?? $finalAmount);
                     $normalizedMethod = $this->normalizePaymentMethod((string) ($payment->method ?? $normalizedMethod));
                 }
 
@@ -258,6 +263,8 @@ class CashierController extends Controller
         }
 
         Cache::forget('server:snapshot:tables:v1');
+        $this->normalizePaymentAmounts($payment);
+        $this->normalizeOrderAmounts($preparedOrder);
 
         return response()->json([
             'message' => $normalizedMethod === 'bon'
@@ -354,6 +361,7 @@ class CashierController extends Controller
         }
 
         Cache::forget('server:snapshot:tables:v1');
+        $this->normalizeOrderAmounts($releasedOrder);
 
         return response()->json([
             'message' => 'Table libérée. Le bon reste en attente d’encaissement.',
@@ -434,10 +442,10 @@ class CashierController extends Controller
                     $lockedOrder->save();
                 }
 
-                $grossAmount = round((float) $lockedOrder->total_amount, 2);
+                $grossAmount = Ariary::round($lockedOrder->total_amount);
                 $discountPercent = (int) ($payment->discount_percent ?? 0);
-                $discountAmount = round((float) ($payment->discount_amount ?? 0), 2);
-                $finalAmount = round((float) ($payment->amount ?? 0), 2);
+                $discountAmount = Ariary::round($payment->discount_amount ?? 0);
+                $finalAmount = Ariary::round($payment->amount ?? 0);
 
                 if ($splitWithVoucher) {
                     if ($initialMethod === 'bon') {
@@ -466,7 +474,7 @@ class CashierController extends Controller
                         );
                     }
 
-                    $immediateAmount = round((float) ($validated['split_immediate_amount'] ?? 0), 2);
+                    $immediateAmount = Ariary::round($validated['split_immediate_amount'] ?? 0);
                     if ($immediateAmount <= 0) {
                         throw new InvalidArgumentException('Le montant du premier paiement doit être supérieur à 0.');
                     }
@@ -477,15 +485,15 @@ class CashierController extends Controller
                         );
                     }
 
-                    $voucherAmount = round($finalAmount - $immediateAmount, 2);
+                    $voucherAmount = Ariary::round($finalAmount - $immediateAmount);
                     if ($voucherAmount <= 0) {
                         throw new InvalidArgumentException('Le reliquat en bon client doit être supérieur à 0.');
                     }
 
                     $completedDiscountAmount = $finalAmount > 0
-                        ? round(($discountAmount * $immediateAmount) / $finalAmount, 2)
+                        ? Ariary::round(($discountAmount * $immediateAmount) / $finalAmount)
                         : 0.0;
-                    $voucherDiscountAmount = round(max(0, $discountAmount - $completedDiscountAmount), 2);
+                    $voucherDiscountAmount = Ariary::round(max(0, $discountAmount - $completedDiscountAmount));
 
                     $payment->amount = $immediateAmount;
                     $payment->discount_percent = $discountPercent;
@@ -620,6 +628,8 @@ class CashierController extends Controller
         }
 
         Cache::forget('server:snapshot:tables:v1');
+        $this->normalizePaymentAmounts($payment);
+        $this->normalizeOrderAmounts($updatedOrder);
 
         return response()->json([
             'payment' => $payment,
@@ -694,7 +704,7 @@ class CashierController extends Controller
             ->sum('amount');
 
         $stats = [
-            'total_revenue' => round((float) $completedToday->sum('amount'), 2),
+            'total_revenue' => Ariary::round($completedToday->sum('amount')),
             'total_orders' => Order::where('status', 'paid')
                 ->where('paid_at', '>=', $today)
                 ->count(),
@@ -707,7 +717,7 @@ class CashierController extends Controller
                     return [
                         'method' => $method,
                         'count' => $payments->count(),
-                        'total' => round((float) $payments->sum('amount'), 2),
+                        'total' => Ariary::round($payments->sum('amount')),
                         'account' => $account,
                         'account_label' => $account ? (CashMovement::treasuryAccountLabels()[$account] ?? $account) : null,
                     ];
@@ -735,6 +745,9 @@ class CashierController extends Controller
     public function generateInvoice(Order $order)
     {
         $payments = $order->payments()->orderBy('id')->get();
+        $payments->each(function (Payment $payment) {
+            $this->normalizePaymentAmounts($payment);
+        });
         $payment = $payments->sortByDesc('id')->first();
         $canGenerate = $order->status === 'paid'
             || !empty($order->bill_requested_at)
@@ -745,21 +758,24 @@ class CashierController extends Controller
         }
 
         $items = $order->items()->with('menu')->get();
-        $itemsSubtotal = round((float) $items->sum(function ($item) {
-            return (float) ($item->price_at_order ?? 0) * (float) ($item->quantity ?? 0);
-        }), 2);
+        $items->each(function (OrderItem $item) {
+            $item->price_at_order = Ariary::round($item->price_at_order);
+        });
+        $itemsSubtotal = (float) $items->sum(function (OrderItem $item) {
+            return Ariary::lineTotal($item->price_at_order, $item->quantity);
+        });
         $packagingQuantity = max(0, (int) ($order->packaging_quantity ?? 0));
-        $packagingUnitPrice = round(max(0.0, (float) ($order->packaging_unit_price ?? 0)), 2);
-        $packagingTotal = round($packagingQuantity * $packagingUnitPrice, 2);
-        $completedAmount = round((float) $payments->where('status', 'completed')->sum('amount'), 2);
-        $pendingAmount = round((float) $payments->where('status', 'pending')->sum('amount'), 2);
+        $packagingUnitPrice = Ariary::round(max(0.0, (float) ($order->packaging_unit_price ?? 0)));
+        $packagingTotal = Ariary::lineTotal($packagingUnitPrice, $packagingQuantity);
+        $completedAmount = Ariary::round($payments->where('status', 'completed')->sum('amount'));
+        $pendingAmount = Ariary::round($payments->where('status', 'pending')->sum('amount'));
         $discountPercent = (int) ($payments->max('discount_percent') ?? 0);
-        $discountAmount = round((float) $payments->sum('discount_amount'), 2);
-        $netTotal = round(max(
+        $discountAmount = Ariary::round($payments->sum('discount_amount'));
+        $netTotal = Ariary::round(max(
             $completedAmount + $pendingAmount,
-            (float) ($payment?->amount ?? 0),
-            (float) ($order->total_amount ?? 0) - $discountAmount
-        ), 2);
+            Ariary::round($payment?->amount ?? 0),
+            Ariary::round($order->total_amount ?? 0) - $discountAmount
+        ));
 
         $invoice = [
             'order_id' => $order->id,
@@ -773,7 +789,7 @@ class CashierController extends Controller
             'items' => $items,
             'payments' => $payments->values(),
             'items_subtotal' => $itemsSubtotal,
-            'subtotal' => round($itemsSubtotal + $packagingTotal, 2),
+            'subtotal' => Ariary::round($itemsSubtotal + $packagingTotal),
             'payment' => $payment,
             'bill_requested_at' => $order->bill_requested_at,
             'created_at' => $order->created_at,
@@ -833,7 +849,7 @@ class CashierController extends Controller
                     'account' => $account,
                     'account_label' => CashMovement::treasuryAccountLabels()[$account] ?? $account,
                     'count' => $group->count(),
-                    'total' => round((float) $group->sum('amount'), 2),
+                    'total' => Ariary::round($group->sum('amount')),
                 ];
             })
             ->sortBy('account')
@@ -855,9 +871,9 @@ class CashierController extends Controller
         return [
             'id' => (int) $payment->id,
             'order_id' => (int) $payment->order_id,
-            'amount' => round((float) $payment->amount, 2),
+            'amount' => Ariary::round($payment->amount),
             'discount_percent' => (int) ($payment->discount_percent ?? 0),
-            'discount_amount' => round((float) ($payment->discount_amount ?? 0), 2),
+            'discount_amount' => Ariary::round($payment->discount_amount),
             'method' => (string) ($payment->method ?? ''),
             'settlement_method' => $payment->settlement_method,
             'status' => (string) ($payment->status ?? ''),
@@ -903,13 +919,13 @@ class CashierController extends Controller
                 continue;
             }
 
-            $gross = max(0.0, (float) ($order->total_amount ?? 0));
-            $net = max(0.0, (float) ($payment->amount ?? 0));
+            $gross = max(0.0, Ariary::round($order->total_amount));
+            $net = max(0.0, Ariary::round($payment->amount));
             $factor = $gross > 0 ? ($net / $gross) : 1.0;
 
             foreach ($order->items as $item) {
-                $lineGross = (float) ($item->price_at_order ?? 0) * (float) ($item->quantity ?? 0);
-                $lineNet = max(0.0, $lineGross * $factor);
+                $lineGross = Ariary::lineTotal($item->price_at_order, $item->quantity);
+                $lineNet = max(0.0, Ariary::round($lineGross * $factor));
                 $bucket = $this->salesBucket(
                     (string) ($item->menu?->category ?? ''),
                     (string) ($item->menu?->name ?? ''),
@@ -920,10 +936,10 @@ class CashierController extends Controller
         }
 
         return [
-            'restaurant' => round($totals['restaurant'], 2),
-            'boissons' => round($totals['boissons'], 2),
-            'cocktails' => round($totals['cocktails'], 2),
-            'total' => round($totals['restaurant'] + $totals['boissons'] + $totals['cocktails'], 2),
+            'restaurant' => Ariary::round($totals['restaurant']),
+            'boissons' => Ariary::round($totals['boissons']),
+            'cocktails' => Ariary::round($totals['cocktails']),
+            'total' => Ariary::round($totals['restaurant'] + $totals['boissons'] + $totals['cocktails']),
         ];
     }
 
@@ -1033,6 +1049,37 @@ class CashierController extends Controller
         return (int) $customer->id;
     }
 
+    private function normalizeOrderAmounts(Order $order): void
+    {
+        $order->total_amount = Ariary::round($order->total_amount);
+
+        if ($this->hasOrderColumn('packaging_unit_price')) {
+            $order->packaging_unit_price = Ariary::round($order->packaging_unit_price);
+        }
+
+        if ($order->relationLoaded('payments')) {
+            $order->payments->each(function (Payment $payment) {
+                $this->normalizePaymentAmounts($payment);
+            });
+        }
+
+        if ($order->relationLoaded('latestPayment') && $order->latestPayment) {
+            $this->normalizePaymentAmounts($order->latestPayment);
+        }
+
+        if ($order->relationLoaded('items')) {
+            $order->items->each(function (OrderItem $item) {
+                $item->price_at_order = Ariary::round($item->price_at_order);
+            });
+        }
+    }
+
+    private function normalizePaymentAmounts(Payment $payment): void
+    {
+        $payment->amount = Ariary::round($payment->amount);
+        $payment->discount_amount = Ariary::round($payment->discount_amount);
+    }
+
     private function paymentSelectColumns(): array
     {
         return [
@@ -1067,7 +1114,7 @@ class CashierController extends Controller
             'flow_type' => (string) $payment->method === 'bon'
                 ? 'customer_voucher_settlement'
                 : 'customer_payment',
-            'amount' => round($amount, 2),
+            'amount' => Ariary::round($amount),
             'payment_method' => $actualMethod,
             'source_account' => null,
             'destination_account' => CashMovement::accountFromPaymentMethod($actualMethod) ?? CashMovement::ACCOUNT_CASH,
@@ -1086,7 +1133,7 @@ class CashierController extends Controller
                 'initial_method' => $payment->method,
                 'settlement_method' => $actualMethod,
                 'discount_percent' => $discountPercent,
-                'discount_amount' => round($discountAmount, 2),
+                'discount_amount' => Ariary::round($discountAmount),
             ],
             'approved_at' => now(),
         ]);
@@ -1099,7 +1146,7 @@ class CashierController extends Controller
             'changes' => [
                 'order_id' => $order->id,
                 'payment_id' => $payment->id,
-                'amount' => round($amount, 2),
+                'amount' => Ariary::round($amount),
                 'initial_method' => $payment->method,
                 'settlement_method' => $actualMethod,
             ],

@@ -10,6 +10,8 @@ const formatAr = (value) => {
   })} Ar`;
 };
 
+const roundAriary = (value) => Math.round(Number(value || 0) + Number.EPSILON);
+
 const formatSignedAr = (value) => {
   const amount = Number(value || 0);
   const prefix = amount > 0 ? '+' : '';
@@ -636,7 +638,7 @@ const RevenueDashboard = () => {
 
   const openPriceEditor = (row) => {
     setEditingPriceRow(row);
-    setPriceEditValue(String(Number(row?.current_catalog_price || 0)));
+    setPriceEditValue(String(roundAriary(row?.current_catalog_price || 0)));
   };
 
   const closePriceEditor = (force = false) => {
@@ -658,7 +660,7 @@ const RevenueDashboard = () => {
 
     try {
       await adminAPI.updateMenu(editingPriceRow.menu_id, {
-        price: Number(priceEditValue || 0),
+        price: Math.max(0, roundAriary(priceEditValue || 0)),
       });
 
       await loadReport({ silent: true });
@@ -1010,7 +1012,7 @@ const RevenueDashboard = () => {
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="1"
                   value={priceEditValue}
                   onChange={(event) => setPriceEditValue(event.target.value)}
                   required

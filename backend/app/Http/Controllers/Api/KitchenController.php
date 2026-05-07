@@ -57,6 +57,7 @@ class KitchenController extends Controller
                 'customer_id',
                 'user_id',
                 'status',
+                'special_requests',
                 'is_urgent',
                 'created_at',
             ])
@@ -193,7 +194,7 @@ class KitchenController extends Controller
                     ->where('station', $station)
                     ->whereIn('status', ['ready', 'served']);
             })
-            ->select(['id', 'table_id', 'customer_id', 'status', 'total_amount', 'created_at', 'ready_at', 'served_at', 'paid_at'])
+            ->select(['id', 'table_id', 'customer_id', 'status', 'special_requests', 'total_amount', 'created_at', 'ready_at', 'served_at', 'paid_at'])
             ->with([
                 'items' => function ($itemQuery) use ($station) {
                     $itemQuery

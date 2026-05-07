@@ -344,4 +344,36 @@ class CrudApiTest extends TestCase
         $response->assertStatus(409)
             ->assertJsonPath('require_confirmation', true);
     }
+
+    public function test_admin_menu_prices_are_rounded_to_whole_ariary(): void
+    {
+        $this->actingAsAdmin();
+
+        $createResponse = $this->postJson('/api/admin/menus', [
+            'name' => 'Menu arrondi',
+            'description' => 'Prix entier ariary',
+            'price' => 8034.98,
+            'category' => 'main',
+            'is_available' => true,
+            'ingredients' => [],
+        ]);
+
+        $createResponse->assertCreated();
+
+        $menuId = (int) $createResponse->json('id');
+        $menu = Menu::query()->findOrFail($menuId);
+        $this->assertSame(8035.0, (float) $menu->price);
+
+        $listResponse = $this->getJson('/api/admin/menus');
+        $listResponse->assertOk();
+        $listedMenu = collect($listResponse->json())->firstWhere('id', $menuId);
+        $this->assertSame(8035.0, (float) ($listedMenu['price'] ?? 0));
+
+        $this->putJson("/api/admin/menus/{$menuId}", [
+            'price' => 12000.51,
+        ])->assertOk();
+
+        $menu->refresh();
+        $this->assertSame(12001.0, (float) $menu->price);
+    }
 }

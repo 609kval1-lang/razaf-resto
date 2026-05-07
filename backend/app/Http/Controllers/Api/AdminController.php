@@ -13,6 +13,7 @@ use App\Models\Payment;
 use App\Models\Supplier;
 use App\Services\InventoryService;
 use App\Services\SupplierProcurementService;
+use App\Support\Ariary;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -773,24 +774,28 @@ class AdminController extends Controller
 
     public function listMenus()
     {
-        return response()->json(
-            Menu::query()
-                ->select(['id', 'name', 'description', 'price', 'category', 'image_url', 'is_available', 'created_at', 'updated_at'])
-                ->with([
-                    'ingredients' => function ($query) {
-                        $query->select([
-                            'ingredients.id',
-                            'ingredients.raw_material_id',
-                            'ingredients.name',
-                            'ingredients.portion_size',
-                            'ingredients.portion_unit',
-                            'ingredients.quantity_available',
-                            'ingredients.cost_per_portion',
-                        ]);
-                    },
-                ])
-                ->get()
-        );
+        $menus = Menu::query()
+            ->select(['id', 'name', 'description', 'price', 'category', 'image_url', 'is_available', 'created_at', 'updated_at'])
+            ->with([
+                'ingredients' => function ($query) {
+                    $query->select([
+                        'ingredients.id',
+                        'ingredients.raw_material_id',
+                        'ingredients.name',
+                        'ingredients.portion_size',
+                        'ingredients.portion_unit',
+                        'ingredients.quantity_available',
+                        'ingredients.cost_per_portion',
+                    ]);
+                },
+            ])
+            ->get();
+
+        $menus->each(function (Menu $menu) {
+            $menu->price = Ariary::round($menu->price);
+        });
+
+        return response()->json($menus);
     }
 
     public function getSummary()
@@ -858,6 +863,9 @@ class AdminController extends Controller
             $validated['image_url'] = $uploadedImageUrl;
         }
         unset($validated['image_file']);
+        if (array_key_exists('price', $validated)) {
+            $validated['price'] = Ariary::round($validated['price']);
+        }
         $ingredientPayload = array_key_exists('ingredients', $validated) ? (array) $validated['ingredients'] : [];
         unset($validated['ingredients']);
 
@@ -942,6 +950,9 @@ class AdminController extends Controller
             $validated['image_url'] = $uploadedImageUrl;
         }
         unset($validated['image_file']);
+        if (array_key_exists('price', $validated)) {
+            $validated['price'] = Ariary::round($validated['price']);
+        }
 
         $menu->update($validated);
 
@@ -1007,7 +1018,7 @@ class AdminController extends Controller
             ]);
         }
 
-        $baselineCatalogPrice = round((float) ($menu->price ?? 0), 2);
+        $baselineCatalogPrice = Ariary::round($menu->price ?? 0);
         $baselineUnitCost = round((float) $menu->ingredients->sum(function ($ingredient) {
             return (float) ($ingredient->pivot->quantity_needed ?? 0) * (float) ($ingredient->cost_per_portion ?? 0);
         }), 2);
@@ -1110,10 +1121,10 @@ class AdminController extends Controller
                 continue;
             }
 
-            $orderNetTotals[$paymentOrderId] = ($orderNetTotals[$paymentOrderId] ?? 0.0) + (float) ($payment->amount ?? 0);
+            $orderNetTotals[$paymentOrderId] = ($orderNetTotals[$paymentOrderId] ?? 0.0) + Ariary::round($payment->amount ?? 0);
 
             if (!array_key_exists($paymentOrderId, $orderGrossTotals)) {
-                $orderGrossTotals[$paymentOrderId] = (float) ($payment->order?->total_amount ?? 0);
+                $orderGrossTotals[$paymentOrderId] = Ariary::round($payment->order?->total_amount ?? 0);
             }
         }
 
@@ -1133,13 +1144,13 @@ class AdminController extends Controller
                 $rowOrderId = (int) ($packagingRow->id ?? 0);
                 $hasPackaging = (bool) ($packagingRow->with_packaging ?? false);
                 $packagingQuantity = max(0, (int) ($packagingRow->packaging_quantity ?? 0));
-                $packagingUnitPrice = round(max(0.0, (float) ($packagingRow->packaging_unit_price ?? 0)), 2);
+                $packagingUnitPrice = Ariary::round(max(0.0, (float) ($packagingRow->packaging_unit_price ?? 0)));
 
                 if (!$hasPackaging || $packagingQuantity <= 0 || $packagingUnitPrice <= 0) {
                     continue;
                 }
 
-                $packagingTotal = round($packagingQuantity * $packagingUnitPrice, 2);
+                $packagingTotal = Ariary::lineTotal($packagingUnitPrice, $packagingQuantity);
                 $packagingByOrderId[$rowOrderId] = $packagingTotal;
                 $packagingQuantityTotal += $packagingQuantity;
                 $packagingRevenueGross += $packagingTotal;
@@ -1192,7 +1203,7 @@ class AdminController extends Controller
                 'menu_id' => (int) $menu->id,
                 'menu_name' => (string) $menu->name,
                 'menu_category' => (string) ($menu->category ?: 'autres'),
-                'current_catalog_price' => round((float) ($menu->price ?? 0), 2),
+                'current_catalog_price' => Ariary::round($menu->price ?? 0),
                 'unit_estimated_cost' => round($menuUnitCost, 2),
                 'total_quantity' => 0,
                 'total_revenue' => 0,
@@ -1212,7 +1223,7 @@ class AdminController extends Controller
                     'menu_id' => $menuId,
                     'menu_name' => $item->menu?->name ? (string) $item->menu->name : "Menu #{$menuId}",
                     'menu_category' => $item->menu?->category ? (string) $item->menu->category : 'autres',
-                    'current_catalog_price' => round((float) ($item->menu?->price ?? $item->price_at_order ?? 0), 2),
+                    'current_catalog_price' => Ariary::round($item->menu?->price ?? $item->price_at_order ?? 0),
                     'unit_estimated_cost' => 0.0,
                     'total_quantity' => 0,
                     'total_revenue' => 0,
@@ -1222,7 +1233,7 @@ class AdminController extends Controller
             }
 
             $quantity = (int) ($item->quantity ?? 0);
-            $lineRevenue = (float) ($item->price_at_order ?? 0) * $quantity;
+            $lineRevenue = Ariary::lineTotal($item->price_at_order, $quantity);
             $lineCost = (float) ($menuStatsMap[$menuId]['unit_estimated_cost'] ?? 0) * $quantity;
 
             $menuStatsMap[$menuId]['total_quantity'] += $quantity;
@@ -1241,10 +1252,10 @@ class AdminController extends Controller
                     'menu_id' => $row['menu_id'],
                     'menu_name' => $row['menu_name'],
                     'menu_category' => $row['menu_category'] ?? 'autres',
-                    'current_catalog_price' => round((float) ($row['current_catalog_price'] ?? 0), 2),
+                    'current_catalog_price' => Ariary::round($row['current_catalog_price'] ?? 0),
                     'unit_estimated_cost' => round((float) ($row['unit_estimated_cost'] ?? 0), 2),
                     'total_quantity' => (int) $row['total_quantity'],
-                    'total_revenue' => round((float) $row['total_revenue'], 2),
+                    'total_revenue' => Ariary::round($row['total_revenue']),
                     'total_cost' => round((float) $row['total_cost'], 2),
                     'total_profit' => round((float) $row['total_profit'], 2),
                     'margin_percent' => round((float) $profitOnCostPercent, 1),
@@ -1290,7 +1301,7 @@ class AdminController extends Controller
                     'menus_count' => (int) $group->count(),
                     'menus_sold_count' => (int) $group->filter(fn ($row) => (int) ($row['total_quantity'] ?? 0) > 0)->count(),
                     'total_quantity' => (int) $group->sum('total_quantity'),
-                    'total_revenue' => round((float) $group->sum('total_revenue'), 2),
+                    'total_revenue' => Ariary::round($group->sum('total_revenue')),
                     'total_cost' => round((float) $group->sum('total_cost'), 2),
                     'total_profit' => round((float) $group->sum('total_profit'), 2),
                 ];
@@ -1316,17 +1327,17 @@ class AdminController extends Controller
                 'selected_user_name' => $userId ? optional($users->firstWhere('id', $userId))->name : 'Tous les utilisateurs',
             ],
             'summary' => [
-                'total_revenue_net' => round($totalRevenueNet, 2),
-                'total_discount' => round($totalDiscount, 2),
-                'total_revenue_gross' => round($totalRevenueGross, 2),
+                'total_revenue_net' => Ariary::round($totalRevenueNet),
+                'total_discount' => Ariary::round($totalDiscount),
+                'total_revenue_gross' => Ariary::round($totalRevenueGross),
                 'total_estimated_cost' => round($totalEstimatedCost, 2),
                 'total_estimated_profit' => round($totalEstimatedProfit, 2),
                 'payments_count' => $paymentsCount,
                 'paid_orders_count' => $paidOrdersCount,
-                'avg_ticket_net' => $paidOrdersCount > 0 ? round($totalRevenueNet / $paidOrdersCount, 2) : 0,
+                'avg_ticket_net' => $paidOrdersCount > 0 ? Ariary::round($totalRevenueNet / $paidOrdersCount) : 0,
                 'packaging_quantity_total' => (int) $packagingQuantityTotal,
-                'packaging_revenue_gross' => round($packagingRevenueGross, 2),
-                'packaging_revenue_net' => round($packagingRevenueNet, 2),
+                'packaging_revenue_gross' => Ariary::round($packagingRevenueGross),
+                'packaging_revenue_net' => Ariary::round($packagingRevenueNet),
             ],
             'category_summary' => $categorySummary,
             'menu_stats' => $menuStats->all(),
@@ -1522,7 +1533,7 @@ class AdminController extends Controller
             }
 
             $menuStat = $menuStatsById->get($menuId, []);
-            $catalogPrice = round((float) ($menu->price ?? 0), 2);
+            $catalogPrice = Ariary::round($menu->price ?? 0);
             $currentUnitCost = round((float) ($menuStat['unit_estimated_cost'] ?? 0), 2);
             $baselineUnitCost = round((float) ($menu->baseline_unit_cost ?? $currentUnitCost), 2);
             $currentProfitOnCostPercent = $currentUnitCost > 0
@@ -1548,7 +1559,7 @@ class AdminController extends Controller
                 $catalogPrice
             );
 
-            $priceChangeAmount = round($suggestedCatalogPrice - $catalogPrice, 2);
+            $priceChangeAmount = Ariary::round($suggestedCatalogPrice - $catalogPrice);
 
             $priceChangePercent = $catalogPrice > 0
                 ? round(($priceChangeAmount / $catalogPrice) * 100, 2)
@@ -1666,11 +1677,11 @@ class AdminController extends Controller
     ): float
     {
         if ($unitCost <= 0) {
-            return round(max($fallbackCatalogPrice, 0), 2);
+            return Ariary::round(max($fallbackCatalogPrice, 0));
         }
 
         $targetProfitRatio = max(0, $targetProfitOnCostPercent / 100);
-        return round($unitCost * (1 + $targetProfitRatio), 2);
+        return Ariary::round($unitCost * (1 + $targetProfitRatio));
     }
 
     private function resolveProfitBasedPricingAdjustment(
@@ -1680,7 +1691,7 @@ class AdminController extends Controller
         float $catalogPrice
     ): array
     {
-        if (abs(round($suggestedCatalogPrice, 2) - round($catalogPrice, 2)) < 0.01) {
+        if (abs(Ariary::round($suggestedCatalogPrice) - Ariary::round($catalogPrice)) < 1) {
             return ['keep', 'Prix aligné'];
         }
 
@@ -1688,7 +1699,7 @@ class AdminController extends Controller
             return ['increase', 'Hausse proposée'];
         }
 
-        if (round($suggestedCatalogPrice, 2) < round($catalogPrice, 2)) {
+        if (Ariary::round($suggestedCatalogPrice) < Ariary::round($catalogPrice)) {
             return ['decrease', 'Baisse proposée'];
         }
 

@@ -25,7 +25,7 @@ const formatCurrency = (value) => {
   })} Ar`;
 };
 
-const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+const roundMoney = (value) => Math.round(Number(value || 0) + Number.EPSILON);
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -644,9 +644,9 @@ const getNotificationButtonLabel = (enabled) => {
 };
 
 const getDiscountedAmount = (baseAmount, discountPercent) => {
-  const gross = Number(baseAmount || 0);
+  const gross = roundMoney(baseAmount);
   const percent = Math.max(0, Math.min(10, Number(discountPercent || 0)));
-  const discountAmount = (gross * percent) / 100;
+  const discountAmount = roundMoney((gross * percent) / 100);
   return Math.max(0, gross - discountAmount);
 };
 
@@ -1284,7 +1284,7 @@ export const CashierPaymentsModule = () => {
             if (currentSplitAmount <= 0 || currentSplitAmount >= totalAmount) {
               const suggestedAmount = totalAmount > 1
                 ? roundMoney(totalAmount / 2)
-                : roundMoney(Math.max(totalAmount - 0.01, 0.01));
+                : 1;
               nextForm.split_immediate_amount = suggestedAmount;
             }
 
@@ -1697,7 +1697,7 @@ export const CashierPaymentsModule = () => {
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="1"
               value={form.amount}
               onChange={(event) => updatePaymentField(order.id, 'amount', event.target.value)}
               readOnly
@@ -1782,7 +1782,7 @@ export const CashierPaymentsModule = () => {
                 <input
                   type="number"
                   min="0.01"
-                  step="0.01"
+                  step="1"
                   value={form.split_immediate_amount}
                   onChange={(event) => updatePaymentField(order.id, 'split_immediate_amount', event.target.value)}
                 />
@@ -2371,7 +2371,7 @@ export const CashierCashRegisterModule = () => {
     event.preventDefault();
     setMessage(null);
 
-    const amount = Number(formData.amount || 0);
+    const amount = roundMoney(formData.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setMessage({ type: 'error', text: 'Montant invalide.' });
       return;
@@ -2439,7 +2439,7 @@ export const CashierCashRegisterModule = () => {
             <input
               type="number"
               min="0.01"
-              step="0.01"
+              step="1"
               value={formData.amount}
               onChange={(event) => setFormData((prev) => ({ ...prev, amount: event.target.value }))}
               required

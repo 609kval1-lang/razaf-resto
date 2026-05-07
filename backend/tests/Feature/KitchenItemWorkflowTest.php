@@ -94,11 +94,58 @@ class KitchenItemWorkflowTest extends TestCase
             ->assertJsonPath('error', 'Tous les menus doivent être prêts ou servis avant la demande d’addition.');
     }
 
+    public function test_kitchen_queue_exposes_order_notes_for_station_ticket(): void
+    {
+        $kitchen = User::factory()->create(['role' => 'kitchen']);
+        $server = User::factory()->create(['role' => 'server']);
+        Sanctum::actingAs($kitchen);
+
+        $table = $this->createTable(33);
+        [, , $order] = $this->createKitchenOrder(
+            $server,
+            $table,
+            ['pending', 'pending'],
+            'pending',
+            'Sans oignons, sauce a part.'
+        );
+
+        $this->getJson('/api/kitchen/orders')
+            ->assertStatus(200)
+            ->assertJsonFragment([
+                'id' => $order->id,
+                'special_requests' => 'Sans oignons, sauce a part.',
+            ]);
+    }
+
+    public function test_kitchen_history_exposes_order_notes(): void
+    {
+        $kitchen = User::factory()->create(['role' => 'kitchen']);
+        $server = User::factory()->create(['role' => 'server']);
+        Sanctum::actingAs($kitchen);
+
+        $table = $this->createTable(34);
+        [, , $order] = $this->createKitchenOrder(
+            $server,
+            $table,
+            ['ready', 'served'],
+            'ready',
+            'Allergie arachide.'
+        );
+
+        $this->getJson('/api/kitchen/history?scope=all')
+            ->assertStatus(200)
+            ->assertJsonFragment([
+                'id' => $order->id,
+                'special_requests' => 'Allergie arachide.',
+            ]);
+    }
+
     private function createKitchenOrder(
         User $server,
         RestaurantTable $table,
         array $itemStatuses = ['pending', 'pending'],
-        string $orderStatus = 'pending'
+        string $orderStatus = 'pending',
+        ?string $specialRequests = null
     ): array {
         $firstMenu = Menu::create([
             'name' => 'Plat cuisine 1',
@@ -121,6 +168,7 @@ class KitchenItemWorkflowTest extends TestCase
             'table_id' => $table->id,
             'total_amount' => 21000,
             'status' => $orderStatus,
+            'special_requests' => $specialRequests,
             'is_urgent' => false,
         ]);
 

@@ -934,6 +934,12 @@ export const KitchenQueueModule = ({ station = 'kitchen' }) => {
                     </div>
                   </header>
 
+                  {order?.special_requests ? (
+                    <p className="staff-order-note">
+                      <strong>Notes:</strong> {order.special_requests}
+                    </p>
+                  ) : null}
+
                   <ul>
                     {(order.items || []).map((item) => {
                       const recipeDetails = buildItemRecipeDetails(item);
@@ -1094,6 +1100,9 @@ export const KitchenHistoryModule = ({ station = 'kitchen' }) => {
                   <span className="staff-item-summary">
                     Créée: {formatDateTime(order.created_at)} · Prête: {formatDateTime(order.ready_at)} · Servie: {formatDateTime(order.served_at)}
                   </span>
+                  {order?.special_requests ? (
+                    <span className="staff-item-summary">Notes: {order.special_requests}</span>
+                  ) : null}
                 </div>
                 <div className="staff-status-stack">
                   <StatusBadge status={resolveStationOrderStatus(order)} />

@@ -9,6 +9,7 @@ use App\Models\Ingredient;
 use App\Models\RestaurantTable;
 use App\Models\Customer;
 use App\Models\RawMaterial;
+use App\Support\Ariary;
 use App\Support\PreparationStation;
 use App\Services\InventoryService;
 use App\Http\Controllers\Controller;
@@ -326,6 +327,7 @@ class ServerController extends Controller
                     ->get();
 
                 foreach ($menus as $menu) {
+                    $menu->price = Ariary::round($menu->price);
                     $maxPortionsAvailable = null;
                     $insufficientIngredients = [];
 
@@ -390,7 +392,7 @@ class ServerController extends Controller
                                 return [
                                     'id' => (int) $candidate->id,
                                     'name' => (string) $candidate->name,
-                                    'price' => (float) $candidate->price,
+                                    'price' => Ariary::round($candidate->price),
                                     'max_portions_available' => (int) ($candidate->max_portions_available ?? 0),
                                     'prep_station' => (string) ($candidate->prep_station ?? ''),
                                 ];
@@ -459,7 +461,7 @@ class ServerController extends Controller
             ? max(0, (int) ($validated['packaging_quantity'] ?? 0))
             : 0;
         $packagingUnitPrice = $isTakeawayOrder && $withPackaging
-            ? round(max(0.0, (float) ($validated['packaging_unit_price'] ?? 0)), 2)
+            ? Ariary::round(max(0.0, (float) ($validated['packaging_unit_price'] ?? 0)))
             : 0.0;
         $allowMissingIngredients = (bool) ($validated['allow_missing_ingredients'] ?? false);
         $customerId = $validated['customer_id'] ?? null;
@@ -815,7 +817,7 @@ class ServerController extends Controller
                         'order_id' => $order->id,
                         'menu_id' => (int) $item['menu_id'],
                         'quantity' => (int) $item['quantity'],
-                        'price_at_order' => $menu->price,
+                        'price_at_order' => Ariary::round($menu->price),
                         'status' => 'pending',
                         'station' => PreparationStation::stationForMenu($menu),
                     ]);
@@ -857,15 +859,13 @@ class ServerController extends Controller
                 }
 
                 // Calculer total
-                $itemsTotal = (float) $order->calculateTotal();
+                $itemsTotal = (float) $order->items()
+                    ->get(['quantity', 'price_at_order'])
+                    ->sum(fn (OrderItem $item) => Ariary::lineTotal($item->price_at_order, $item->quantity));
                 $packagingTotal = ($supportsPackagingPricingFields && (bool) ($order->with_packaging ?? false))
-                    ? round(
-                        ((int) ($order->packaging_quantity ?? 0))
-                        * ((float) ($order->packaging_unit_price ?? 0)),
-                        2
-                    )
+                    ? Ariary::lineTotal($order->packaging_unit_price, $order->packaging_quantity)
                     : 0.0;
-                $order->total_amount = round($itemsTotal + $packagingTotal, 2);
+                $order->total_amount = Ariary::round($itemsTotal + $packagingTotal);
                 $order->save();
 
                 $this->synchronizeOrderWorkflowStatus($order);
@@ -885,6 +885,7 @@ class ServerController extends Controller
         $this->flushServerSnapshotCaches();
 
         $responseOrder = $order->load('items.menu', 'table', 'customer', 'user');
+        $this->normalizeOrderAmounts($responseOrder);
         $responseOrder->stock_warnings = [
             'has_shortage' => !empty($insufficient) || !empty($rawMaterialShortages),
             'ingredients' => $insufficient,
@@ -976,6 +977,7 @@ class ServerController extends Controller
 
         foreach ($orders as $order) {
             $this->synchronizeOrderWorkflowStatus($order, false);
+            $this->normalizeOrderAmounts($order);
         }
 
         return $orders;
@@ -1044,6 +1046,7 @@ class ServerController extends Controller
         }
 
         Cache::forget(self::CACHE_KEY_TABLES);
+        $this->normalizeOrderAmounts($order);
 
         return response()->json([
             'message' => 'Demande d’addition transmise à la caisse.',
@@ -1099,11 +1102,31 @@ class ServerController extends Controller
         }
 
         Cache::forget(self::CACHE_KEY_TABLES);
+        $this->normalizeOrderAmounts($order);
 
         return response()->json([
             'message' => 'Menu marqué comme servie.',
             'order' => $order,
         ]);
+    }
+
+    private function normalizeOrderAmounts(Order $order): void
+    {
+        $order->total_amount = Ariary::round($order->total_amount);
+
+        if ($this->hasOrderColumn('packaging_unit_price')) {
+            $order->packaging_unit_price = Ariary::round($order->packaging_unit_price);
+        }
+
+        if ($order->relationLoaded('items')) {
+            $order->items->each(function (OrderItem $item) {
+                $item->price_at_order = Ariary::round($item->price_at_order);
+
+                if ($item->relationLoaded('menu') && $item->menu) {
+                    $item->menu->price = Ariary::round($item->menu->price);
+                }
+            });
+        }
     }
 
     private function mergeOrderNotes(string $existingNotes, string $newNotes): string

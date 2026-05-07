@@ -154,4 +154,38 @@ class ServerOrderInventoryTest extends TestCase
         $this->assertSame(500.0, (float) ($data['packaging_unit_price'] ?? 0));
         $this->assertSame(11000.0, (float) ($data['total_amount'] ?? 0));
     }
+
+    public function test_server_order_rounds_sale_prices_to_whole_ariary(): void
+    {
+        $server = User::factory()->create(['role' => 'server']);
+        Sanctum::actingAs($server);
+
+        $menu = Menu::create([
+            'name' => 'Plat arrondi',
+            'description' => 'Test arrondi Ariary',
+            'price' => 8034.98,
+            'category' => 'Plats',
+            'is_available' => true,
+        ]);
+
+        $response = $this->postJson('/api/server/orders', [
+            'order_type' => 'takeaway',
+            'with_packaging' => true,
+            'packaging_quantity' => 1,
+            'packaging_unit_price' => 499.5,
+            'items' => [
+                [
+                    'menu_id' => $menu->id,
+                    'quantity' => 1,
+                ],
+            ],
+        ]);
+
+        $response->assertCreated();
+
+        $data = $response->json();
+        $this->assertSame(8035.0, (float) ($data['items'][0]['price_at_order'] ?? 0));
+        $this->assertSame(500.0, (float) ($data['packaging_unit_price'] ?? 0));
+        $this->assertSame(8535.0, (float) ($data['total_amount'] ?? 0));
+    }
 }

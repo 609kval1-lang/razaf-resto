@@ -360,4 +360,65 @@ class CashierPaymentRoutingTest extends TestCase
         $this->assertSame('preparing', DB::table('orders')->where('id', $order->id)->value('status'));
         $this->assertSame('preparing', DB::table('order_items')->where('id', $item->id)->value('status'));
     }
+
+    public function test_cashier_bill_and_invoice_round_legacy_decimal_sale_amounts_to_whole_ariary(): void
+    {
+        $cashier = User::factory()->create(['role' => 'cashier']);
+        $server = User::factory()->create(['role' => 'server']);
+
+        Sanctum::actingAs($cashier);
+
+        $menu = Menu::query()->create([
+            'name' => 'Plat legacy arrondi',
+            'description' => 'Test montant legacy',
+            'price' => 8034.98,
+            'category' => 'Plats',
+            'is_available' => true,
+        ]);
+
+        $order = Order::query()->create([
+            'user_id' => $server->id,
+            'table_id' => null,
+            'customer_id' => null,
+            'total_amount' => 8034.98,
+            'status' => 'served',
+            'is_urgent' => false,
+            'bill_requested_at' => now(),
+            'occupies_table' => false,
+        ]);
+
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'menu_id' => $menu->id,
+            'quantity' => 1,
+            'price_at_order' => 8034.98,
+            'status' => 'served',
+            'station' => 'kitchen',
+        ]);
+
+        $readyOrdersResponse = $this->getJson('/api/cashier/orders?include_items=1');
+        $readyOrdersResponse->assertOk()
+            ->assertJsonPath('0.id', $order->id);
+
+        $readyOrder = $readyOrdersResponse->json('0');
+        $this->assertSame(8035.0, (float) ($readyOrder['total_amount'] ?? 0));
+        $this->assertSame(8035.0, (float) ($readyOrder['items'][0]['price_at_order'] ?? 0));
+
+        $prepareResponse = $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+            'method' => 'cash',
+        ]);
+        $prepareResponse->assertOk()
+            ->assertJsonPath('amount_due', 8035);
+
+        $this->assertSame(8035.0, (float) ($prepareResponse->json('payment.amount') ?? 0));
+
+        $invoiceResponse = $this->getJson("/api/cashier/invoice/{$order->id}");
+        $invoiceResponse->assertOk()
+            ->assertJsonPath('items_subtotal', 8035)
+            ->assertJsonPath('subtotal', 8035)
+            ->assertJsonPath('total', 8035)
+            ->assertJsonPath('remaining_amount', 8035);
+
+        $this->assertSame(8035.0, (float) ($invoiceResponse->json('items.0.price_at_order') ?? 0));
+    }
 }
