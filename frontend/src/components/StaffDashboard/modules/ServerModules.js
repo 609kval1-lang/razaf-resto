@@ -883,7 +883,7 @@ export const ServerTablesModule = () => {
   );
 };
 
-export const ServerOrdersModule = () => {
+export const ServerOrdersModule = ({ view = 'all' }) => {
   const { confirm } = useDialog();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -1864,6 +1864,9 @@ export const ServerOrdersModule = () => {
     return <div className="staff-card">Chargement des commandes...</div>;
   }
 
+  const showManageView = view !== 'my-orders';
+  const showOrdersView = view !== 'manage';
+
   const renderMenuSection = (title, menuList, emptyMessage) => {
     return (
       <div className="full-width">
@@ -2030,6 +2033,7 @@ export const ServerOrdersModule = () => {
         </div>
       ) : null}
 
+      {showManageView ? (
       <div className="staff-card">
         <div className="staff-card-header">
           <h2>Nouvelle commande</h2>
@@ -2475,10 +2479,15 @@ export const ServerOrdersModule = () => {
           </div>
         </form>
       </div>
+      ) : null}
 
+      {showOrdersView ? (
       <div className="staff-card">
         <div className="staff-card-header">
           <h2>Mes commandes</h2>
+          <button type="button" className="staff-btn secondary" onClick={() => loadOrdersOnly()}>
+            Actualiser
+          </button>
         </div>
 
         {orders.length === 0 ? (
@@ -2576,6 +2585,7 @@ export const ServerOrdersModule = () => {
           </div>
         )}
       </div>
+      ) : null}
     </div>
   );
 };
