@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
-import { RAW_MATERIAL_UNIT_OPTIONS } from '../../utils/units';
 import { normalizePaymentMethod } from '../../utils/paymentMethods';
 import { useDialog } from '../common/DialogProvider';
 import DataTable from '../common/DataTable';
@@ -198,15 +197,6 @@ const mergeUpdatedPurchaseIntoLedger = (currentLedger, updatedPurchase) => {
   };
 };
 
-const createNewRawMaterialDraft = () => ({
-  name: '',
-  description: '',
-  stock: '',
-  unit: 'kg',
-  cost: '',
-  reorder_level: '',
-});
-
 const extractErrorMessage = (error, fallbackMessage) => {
   const response = error?.response?.data;
 
@@ -283,7 +273,7 @@ const SupplierManagement = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', raw_material_ids: [] });
-  const [newRawMaterials, setNewRawMaterials] = useState([]);
+  const [modalError, setModalError] = useState('');
 
   const [activeSupplierId, setActiveSupplierId] = useState('');
   const [ledger, setLedger] = useState(null);
@@ -739,8 +729,8 @@ const SupplierManagement = () => {
 
   const resetForm = () => {
     setFormData({ name: '', email: '', phone: '', raw_material_ids: [] });
-    setNewRawMaterials([]);
     setEditingSupplier(null);
+    setModalError('');
   };
 
   const openCreateModal = () => {
@@ -759,7 +749,7 @@ const SupplierManagement = () => {
       phone: supplier.phone || '',
       raw_material_ids: Array.from(new Set(rawIds)),
     });
-    setNewRawMaterials([]);
+    setModalError('');
     setShowModal(true);
   };
 
@@ -773,33 +763,9 @@ const SupplierManagement = () => {
     }));
   };
 
-  const addNewRawMaterialRow = () => {
-    setNewRawMaterials((previous) => [...previous, createNewRawMaterialDraft()]);
-  };
-
-  const removeNewRawMaterialRow = (indexToRemove) => {
-    setNewRawMaterials((previous) => previous.filter((_, index) => index !== indexToRemove));
-  };
-
-  const updateNewRawMaterialRow = (indexToUpdate, key, value) => {
-    setNewRawMaterials((previous) => previous.map((entry, index) => (
-      index === indexToUpdate ? { ...entry, [key]: value } : entry
-    )));
-  };
-
   const handleSubmitSupplier = async (event) => {
     event.preventDefault();
-
-    const preparedNewRawMaterials = newRawMaterials
-      .map((entry) => ({
-        name: String(entry.name || '').trim(),
-        description: entry.description ? String(entry.description).trim() : '',
-        stock: entry.stock === '' ? null : Number(entry.stock),
-        unit: String(entry.unit || '').trim(),
-        cost: entry.cost === '' ? null : Number(entry.cost),
-        reorder_level: entry.reorder_level === '' ? null : Number(entry.reorder_level),
-      }))
-      .filter((entry) => entry.name !== '');
+    setModalError('');
 
     const payload = {
       name: String(formData.name || '').trim(),
@@ -809,38 +775,13 @@ const SupplierManagement = () => {
     };
 
     if (!payload.name) {
-      setMessage('Le nom du fournisseur est obligatoire');
+      setModalError('Le nom du fournisseur est obligatoire');
       return;
     }
 
-    if (payload.raw_material_ids.length === 0 && preparedNewRawMaterials.length === 0) {
-      setMessage('Selectionnez ou creez au moins une matiere premiere');
+    if (payload.raw_material_ids.length === 0) {
+      setModalError('Selectionnez au moins une matiere premiere existante.');
       return;
-    }
-
-    const hasInvalidNewRawMaterial = preparedNewRawMaterials.some((entry) => (
-      !entry.unit
-      || !Number.isFinite(entry.stock)
-      || Number(entry.stock) < 0
-      || !Number.isFinite(entry.cost)
-      || Number(entry.cost) <= 0
-      || (entry.reorder_level !== null && (!Number.isFinite(entry.reorder_level) || Number(entry.reorder_level) < 0))
-    ));
-
-    if (hasInvalidNewRawMaterial) {
-      setMessage('Verifiez les nouvelles matieres premieres: unite, stock (>=0), cout (>0) et seuil.');
-      return;
-    }
-
-    if (preparedNewRawMaterials.length > 0) {
-      payload.new_raw_materials = preparedNewRawMaterials.map((entry) => ({
-        name: entry.name,
-        description: entry.description || null,
-        stock: Number(entry.stock),
-        unit: entry.unit,
-        cost: Number(entry.cost),
-        reorder_level: entry.reorder_level === null ? null : Number(entry.reorder_level),
-      }));
     }
 
     try {
@@ -854,11 +795,12 @@ const SupplierManagement = () => {
         setMessage(response?.data?.message || 'Fournisseur cree avec succes');
       }
 
+      setModalError('');
       setShowModal(false);
       resetForm();
       await loadPageData({ skipSpinner: true });
     } catch (error) {
-      setMessage(extractErrorMessage(error, 'Erreur lors de la sauvegarde du fournisseur'));
+      setModalError(extractErrorMessage(error, 'Erreur lors de la sauvegarde du fournisseur'));
     }
   };
 
@@ -1336,6 +1278,12 @@ const SupplierManagement = () => {
             </div>
 
             <form onSubmit={handleSubmitSupplier}>
+              {modalError ? (
+                <div className="message error-message" style={{ marginBottom: '12px' }}>
+                  {modalError}
+                </div>
+              ) : null}
+
               <div className="form-group">
                 <label>Nom</label>
                 <input type="text" value={formData.name} onChange={(event) => setFormData((prev) => ({ ...prev, name: event.target.value }))} required />
@@ -1354,7 +1302,11 @@ const SupplierManagement = () => {
               <div className="form-group">
                 <label>Matieres premieres fournies</label>
                 {rawMaterials.length === 0 ? (
-                  <div className="form-hint">Aucune matiere premiere disponible.</div>
+                  <div className="form-hint">
+                    Aucune matiere premiere disponible. Creez d&apos;abord une matiere premiere dans la page dédiée, puis revenez la selectionner ici.
+                    {' '}
+                    <Link to="/admin/raw-materials">Aller à Matières premières</Link>
+                  </div>
                 ) : (
                   <div className="supplier-material-picker">
                     {rawMaterials.map((rawMaterial) => {
@@ -1369,101 +1321,6 @@ const SupplierManagement = () => {
                         </label>
                       );
                     })}
-                  </div>
-                )}
-              </div>
-
-              <div className="form-group">
-                <div className="supplier-new-materials-header">
-                  <label style={{ marginBottom: 0 }}>Nouvelles matieres premieres (optionnel)</label>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={addNewRawMaterialRow}>
-                    + Ajouter matiere
-                  </button>
-                </div>
-
-                {newRawMaterials.length === 0 ? (
-                  <div className="form-hint">Vous pouvez creer de nouvelles matieres ici et les lier directement a ce fournisseur.</div>
-                ) : (
-                  <div className="supplier-new-material-list">
-                    {newRawMaterials.map((entry, index) => (
-                      <div key={`new-raw-${index}`} className="supplier-new-material-card">
-                        <div className="supplier-new-material-grid">
-                          <label className="form-group" style={{ marginBottom: 0 }}>
-                            <span>Nom *</span>
-                            <input
-                              type="text"
-                              value={entry.name}
-                              onChange={(event) => updateNewRawMaterialRow(index, 'name', event.target.value)}
-                              placeholder="Ex: Rhum blanc"
-                            />
-                          </label>
-
-                          <label className="form-group" style={{ marginBottom: 0 }}>
-                            <span>Unite *</span>
-                            <select
-                              value={entry.unit}
-                              onChange={(event) => updateNewRawMaterialRow(index, 'unit', event.target.value)}
-                            >
-                              {RAW_MATERIAL_UNIT_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
-                          </label>
-
-                          <label className="form-group" style={{ marginBottom: 0 }}>
-                            <span>Stock initial *</span>
-                            <input
-                              type="number"
-                              step="0.001"
-                              min="0"
-                              value={entry.stock}
-                              onChange={(event) => updateNewRawMaterialRow(index, 'stock', event.target.value)}
-                              placeholder="0"
-                            />
-                          </label>
-
-                          <label className="form-group" style={{ marginBottom: 0 }}>
-                            <span>Cout unitaire (Ar) *</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={entry.cost}
-                              onChange={(event) => updateNewRawMaterialRow(index, 'cost', event.target.value)}
-                              placeholder="0"
-                            />
-                          </label>
-
-                          <label className="form-group" style={{ marginBottom: 0 }}>
-                            <span>Seuil alerte</span>
-                            <input
-                              type="number"
-                              step="0.001"
-                              min="0"
-                              value={entry.reorder_level}
-                              onChange={(event) => updateNewRawMaterialRow(index, 'reorder_level', event.target.value)}
-                              placeholder="5"
-                            />
-                          </label>
-                        </div>
-
-                        <label className="form-group" style={{ marginBottom: 0 }}>
-                          <span>Description</span>
-                          <textarea
-                            rows="2"
-                            value={entry.description}
-                            onChange={(event) => updateNewRawMaterialRow(index, 'description', event.target.value)}
-                            placeholder="Optionnel"
-                          />
-                        </label>
-
-                        <div className="supplier-new-material-actions">
-                          <button type="button" className="btn btn-danger btn-sm" onClick={() => removeNewRawMaterialRow(index)}>
-                            Retirer
-                          </button>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 )}
               </div>
