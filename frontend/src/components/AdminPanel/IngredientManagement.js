@@ -3,6 +3,7 @@ import { adminAPI } from '../../services/api';
 import { useDialog } from '../common/DialogProvider';
 import DataTable from '../common/DataTable';
 import {
+  calculatePortionCapacity,
   convertUnitValue,
   getLinkedPortionUnit,
   getUnitMeta,
@@ -162,7 +163,7 @@ const IngredientManagement = () => {
 
     try {
       const stockInPortionUnit = convertUnitValue(rawMaterial.stock, rawMaterial.unit, formData.portion_unit);
-      const quantityAvailable = Math.floor(stockInPortionUnit / portionSize);
+      const quantityAvailable = calculatePortionCapacity(stockInPortionUnit, portionSize);
 
       const portionInRawUnit = convertUnitValue(portionSize, formData.portion_unit, rawMaterial.unit);
       const costPerPortion = Number(rawMaterial.cost || 0) * portionInRawUnit;
@@ -315,9 +316,9 @@ const IngredientManagement = () => {
 
   const getStockStatusLabel = (status) => {
     const labels = {
-      low: '🔴 Faible',
-      warning: '🟡 Moyen',
-      good: '🟢 Bon',
+      low: 'Faible',
+      warning: 'Moyen',
+      good: 'Bon',
     };
 
     return labels[status] || 'OK';
@@ -407,7 +408,7 @@ const IngredientManagement = () => {
       header: 'Cocktail',
       sortAccessor: (ingredient) => (ingredient.is_cocktail_ingredient ? 1 : 0),
       searchAccessor: (ingredient) => (ingredient.is_cocktail_ingredient ? 'cocktail' : ''),
-      render: (ingredient) => (ingredient.is_cocktail_ingredient ? '🍸 Oui' : '—'),
+      render: (ingredient) => (ingredient.is_cocktail_ingredient ? 'Oui' : '—'),
     },
     {
       key: 'stock_status',
@@ -431,10 +432,10 @@ const IngredientManagement = () => {
       render: (ingredient) => (
         <div className="actions">
           <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(ingredient)}>
-            ✏️
+            Modifier
           </button>
           <button className="btn btn-danger btn-sm" onClick={() => handleDelete(ingredient.id)}>
-            🗑️
+            Supprimer
           </button>
         </div>
       ),
@@ -449,9 +450,9 @@ const IngredientManagement = () => {
     <div>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>🥕 Gestion des Ingrédients (Portions)</h2>
+          <h2>Gestion des Ingrédients (Portions)</h2>
           <button className="btn btn-primary" onClick={openCreateModal}>
-            ➕ Ajouter Ingrédient
+            Ajouter Ingrédient
           </button>
         </div>
 
@@ -543,11 +544,6 @@ const IngredientManagement = () => {
                       </option>
                     ))}
                   </select>
-                  {selectedRawMaterial ? (
-                    <div className="form-hint">
-                      Unité liée automatiquement: {selectedRawMaterial.unit} vers {linkedPortionUnit || formData.portion_unit}.
-                    </div>
-                  ) : null}
                 </div>
               </div>
 
@@ -559,11 +555,8 @@ const IngredientManagement = () => {
                     onChange={(event) => setFormData({ ...formData, is_cocktail_ingredient: event.target.checked })}
                     disabled={!canBeCocktailIngredient}
                   />
-                  Ingrédient utilisable pour les cocktails (bar)
+                  Utilisable dans les cocktails
                 </label>
-                <div className="form-hint">
-                  Disponible seulement pour les ingrédients buvables: matière première liquide et portion en ml.
-                </div>
               </div>
 
               <div className={`cost-summary ${calculatedPreview.error ? 'is-error' : ''}`}>
@@ -573,7 +566,6 @@ const IngredientManagement = () => {
                   <>
                     <div>Portions disponibles calculées: <strong>{calculatedPreview.quantityAvailable}</strong></div>
                     <div>Coût par portion calculé: <strong>{formatAr(calculatedPreview.costPerPortion)}</strong></div>
-                    <div className="form-hint">{calculatedPreview.explanation}</div>
                   </>
                 )}
               </div>

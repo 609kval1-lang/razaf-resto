@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\ActionLog;
 use App\Models\CashMovement;
 use App\Models\Payment;
+use App\Services\SalesBreakdownService;
+use App\Support\CashierDay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -27,7 +29,7 @@ class CashMovementController extends Controller
     public function cashierStoreWithdrawalRequest(Request $request)
     {
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'min:1', 'decimal:0'],
             'reason' => ['required', 'string', 'max:1000'],
             'description' => ['nullable', 'string', 'max:255'],
         ]);
@@ -214,7 +216,7 @@ class CashMovementController extends Controller
     public function adminStoreDirectWithdrawal(Request $request)
     {
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'min:1', 'decimal:0'],
             'reason' => ['nullable', 'string', 'max:1000', 'required_without:reason_category'],
             'reason_category' => ['nullable', 'string', Rule::in(array_keys($this->withdrawalReasonCatalog()))],
             'reason_details' => ['nullable', 'string', 'max:1000'],
@@ -258,7 +260,7 @@ class CashMovementController extends Controller
     public function adminStoreTransfer(Request $request)
     {
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'min:1', 'decimal:0'],
             'source_account' => ['required', 'string', Rule::in(CashMovement::treasuryAccounts())],
             'destination_account' => ['required', 'string', Rule::in(CashMovement::treasuryAccounts()), 'different:source_account'],
             'reason' => ['required', 'string', 'max:1000'],
@@ -305,7 +307,7 @@ class CashMovementController extends Controller
     public function adminStoreAccountWithdrawal(Request $request)
     {
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'min:1', 'decimal:0'],
             'source_account' => ['required', 'string', Rule::in(CashMovement::treasuryAccounts())],
             'reason' => ['nullable', 'string', 'max:1000', 'required_without:reason_category'],
             'reason_category' => ['nullable', 'string', Rule::in(array_keys($this->withdrawalReasonCatalog()))],
@@ -356,7 +358,7 @@ class CashMovementController extends Controller
         bool $dailyOnly = false
     ): array
     {
-        $today = now()->startOfDay();
+        [$today, $tomorrow] = CashierDay::bounds();
         $movementsQuery = CashMovement::query()
             ->with([
                 'requestedBy:id,name',
@@ -366,7 +368,7 @@ class CashMovementController extends Controller
 
         $this->applyMovementScope($movementsQuery, $scope);
         if ($dailyOnly) {
-            $this->applyEffectiveDateFilter($movementsQuery, $today);
+            $this->applyEffectiveDateFilter($movementsQuery, $today, $tomorrow);
         }
 
         $movements = $movementsQuery
@@ -392,7 +394,7 @@ class CashMovementController extends Controller
 
             $this->applyPendingScope($pendingQuery, $scope);
             if ($dailyOnly) {
-                $this->applyEffectiveDateFilter($pendingQuery, $today);
+                $this->applyEffectiveDateFilter($pendingQuery, $today, $tomorrow);
             }
 
             $pending = $pendingQuery
@@ -417,11 +419,11 @@ class CashMovementController extends Controller
 
     private function cashSummary(bool $dailyOnly = false): array
     {
-        $today = now()->startOfDay();
+        [$today, $tomorrow] = CashierDay::bounds();
         $allInflows = $this->aggregateAccountSums('destination_account');
         $allOutflows = $this->aggregateAccountSums('source_account');
-        $todayInflows = $this->aggregateAccountSums('destination_account', $today);
-        $todayOutflows = $this->aggregateAccountSums('source_account', $today);
+        $todayInflows = $this->aggregateAccountSums('destination_account', $today, $tomorrow);
+        $todayOutflows = $this->aggregateAccountSums('source_account', $today, $tomorrow);
         $accountBalances = $this->buildBalancesFromAggregates($allInflows, $allOutflows);
         $cashInApproved = $this->aggregatedAccountSum($allInflows, CashMovement::ACCOUNT_CASH, 'approved');
         $cashOutApproved = $this->aggregatedAccountSum($allOutflows, CashMovement::ACCOUNT_CASH, 'approved');
@@ -453,7 +455,7 @@ class CashMovementController extends Controller
             ->where('source_account', CashMovement::ACCOUNT_CASH);
 
         if ($dailyOnly) {
-            $this->applyEffectiveDateFilter($pendingRequestQuery, $today);
+            $this->applyEffectiveDateFilter($pendingRequestQuery, $today, $tomorrow);
         }
 
         return [
@@ -474,7 +476,7 @@ class CashMovementController extends Controller
         ];
     }
 
-    private function aggregateAccountSums(string $accountColumn, $since = null): array
+    private function aggregateAccountSums(string $accountColumn, $since = null, $until = null): array
     {
         if (!in_array($accountColumn, ['source_account', 'destination_account'], true)) {
             return [];
@@ -485,7 +487,7 @@ class CashMovementController extends Controller
             ->whereNotNull($accountColumn)
             ->groupBy($accountColumn, 'status');
 
-        $this->applyEffectiveDateFilter($query, $since);
+        $this->applyEffectiveDateFilter($query, $since, $until);
 
         return $query->get()->reduce(function (array $carry, CashMovement $movement) {
             $account = (string) ($movement->account ?? '');
@@ -548,104 +550,22 @@ class CashMovementController extends Controller
 
     private function revenueBreakdownToday(): array
     {
+        [$today, $tomorrow] = CashierDay::bounds();
         $payments = Payment::query()
             ->with([
                 'order.items.menu:id,name,category',
             ])
             ->where('status', 'completed')
-            ->where('encashed_at', '>=', now()->startOfDay())
+            ->where('encashed_at', '>=', $today)
+            ->where('encashed_at', '<', $tomorrow)
             ->get();
-
-        $totals = [
-            'restaurant' => 0.0,
-            'boissons' => 0.0,
-            'cocktails' => 0.0,
-        ];
-
-        foreach ($payments as $payment) {
-            $order = $payment->order;
-            if (!$order) {
-                continue;
-            }
-
-            $gross = max(0.0, (float) ($order->total_amount ?? 0));
-            $net = max(0.0, (float) ($payment->amount ?? 0));
-            $factor = $gross > 0 ? ($net / $gross) : 1.0;
-
-            foreach ($order->items as $item) {
-                $lineGross = (float) ($item->price_at_order ?? 0) * (float) ($item->quantity ?? 0);
-                $lineNet = max(0.0, $lineGross * $factor);
-                $bucket = $this->revenueBucket(
-                    (string) ($item->menu?->category ?? ''),
-                    (string) ($item->menu?->name ?? ''),
-                    (string) ($item->station ?? '')
-                );
-
-                $totals[$bucket] += $lineNet;
-            }
-        }
+        $sales = app(SalesBreakdownService::class)->summarize($payments)['dashboard_sales'];
 
         return [
-            'restaurant' => round($totals['restaurant'], 2),
-            'boissons' => round($totals['boissons'], 2),
-            'cocktails' => round($totals['cocktails'], 2),
-            'total' => round($totals['restaurant'] + $totals['boissons'] + $totals['cocktails'], 2),
+            'dishes' => $sales['dishes'],
+            'drinks' => $sales['drinks'],
+            'total' => $sales['dishes'] + $sales['drinks'],
         ];
-    }
-
-    private function revenueBucket(string $category, string $name, string $station): string
-    {
-        $normalizedCategory = $this->normalize($category);
-        $normalizedName = $this->normalize($name);
-        $normalizedStation = $this->normalize($station);
-
-        $source = trim($normalizedCategory . ' ' . $normalizedName);
-        if ($normalizedStation === 'bar') {
-            $source .= ' bar';
-        }
-
-        foreach (['cocktail', 'mocktail'] as $keyword) {
-            if ($keyword !== '' && str_contains($source, $keyword)) {
-                return 'cocktails';
-            }
-        }
-
-        foreach ([
-            'bar',
-            'boisson',
-            'boissons',
-            'drink',
-            'beverage',
-            'jus',
-            'smoothie',
-            'soda',
-            'eau',
-            'water',
-            'cafe',
-            'coffee',
-            'the',
-            'tea',
-            'infusion',
-            'nectar',
-        ] as $keyword) {
-            if ($keyword !== '' && str_contains($source, $keyword)) {
-                return 'boissons';
-            }
-        }
-
-        return 'restaurant';
-    }
-
-    private function normalize(string $value): string
-    {
-        $value = strtolower(trim($value));
-        return strtr($value, [
-            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
-            'à' => 'a', 'â' => 'a',
-            'î' => 'i', 'ï' => 'i',
-            'ô' => 'o', 'ö' => 'o',
-            'ù' => 'u', 'û' => 'u', 'ü' => 'u',
-        ]);
     }
 
     private function cashAvailableAmount(bool $lockForUpdate = false): float
@@ -1049,18 +969,20 @@ class CashMovementController extends Controller
         return round((float) $query->sum('amount'), 2);
     }
 
-    private function applyEffectiveDateFilter($query, $since): void
+    private function applyEffectiveDateFilter($query, $since, $until = null): void
     {
         if (!$since) {
             return;
         }
 
-        $query->where(function ($builder) use ($since) {
-            $builder->where('approved_at', '>=', $since)
-                ->orWhere(function ($fallback) use ($since) {
-                    $fallback->whereNull('approved_at')
-                        ->where('created_at', '>=', $since);
-                });
+        $query->where(function ($builder) use ($since, $until) {
+            $builder->where(function ($approved) use ($since, $until) {
+                $approved->where('approved_at', '>=', $since);
+                if ($until) $approved->where('approved_at', '<', $until);
+            })->orWhere(function ($fallback) use ($since, $until) {
+                $fallback->whereNull('approved_at')->where('created_at', '>=', $since);
+                if ($until) $fallback->where('created_at', '<', $until);
+            });
         });
     }
 
@@ -1098,7 +1020,8 @@ class CashMovementController extends Controller
         return [
             'id' => (int) $payment->id,
             'order_id' => (int) ($payment->order_id ?? 0),
-            'amount' => round((float) ($payment->amount ?? 0), 2),
+            'amount' => $payment->collected_amount,
+            'deposit_amount' => (int) $payment->deposit_amount,
             'discount_percent' => (int) ($payment->discount_percent ?? 0),
             'discount_amount' => round((float) ($payment->discount_amount ?? 0), 2),
             'method' => (string) ($payment->method ?? ''),
@@ -1132,7 +1055,8 @@ class CashMovementController extends Controller
                     'id' => (int) $payment->id,
                     'order_id' => (int) ($payment->order_id ?? 0),
                     'status' => (string) ($payment->status ?? ''),
-                    'amount' => round((float) ($payment->amount ?? 0), 2),
+                    'amount' => $payment->collected_amount,
+                    'deposit_amount' => (int) $payment->deposit_amount,
                     'method' => (string) ($payment->method ?? ''),
                     'settlement_method' => $payment->settlement_method,
                     'reference' => $payment->reference,

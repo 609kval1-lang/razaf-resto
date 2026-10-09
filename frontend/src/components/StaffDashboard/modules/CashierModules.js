@@ -1,21 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import useSerializedAsyncCallback from '../../../hooks/useSerializedAsyncCallback';
 import { cashierAPI } from '../../../services/api';
-import { playNotificationTone } from '../../../utils/notificationSound';
+import useCashierRefresh, { notifyCashierChanged } from '../../../hooks/useCashierRefresh';
 import { PAYMENT_METHOD_OPTIONS, formatPaymentMethodLabel, normalizePaymentMethod } from '../../../utils/paymentMethods';
+import { isWholeAriary } from '../../../utils/ariary';
+import { calculateCashTender } from '../../../utils/cashTender';
+import CashTenderFields from '../../common/CashTenderFields';
+import './CashierPayments.css';
 import { useToast } from '../../common/ToastProvider';
 
-const OVERVIEW_REFRESH_INTERVAL_MS = 5000;
-const PAYMENTS_REFRESH_INTERVAL_MS = 5000;
-const CASHIER_NOTIFICATION_STORAGE_KEY = 'staff.notifications.cashier';
-const BILL_NOTIFICATION_DEDUP_TTL_MS = 10 * 60 * 1000;
 const IMMEDIATE_PAYMENT_METHOD_OPTIONS = PAYMENT_METHOD_OPTIONS.filter((option) => option.value !== 'bon');
 const IMMEDIATE_PAYMENT_METHOD_VALUES = new Set(IMMEDIATE_PAYMENT_METHOD_OPTIONS.map((option) => option.value));
 const PAYMENT_TYPE_SINGLE = 'single';
 const PAYMENT_TYPE_VOUCHER = 'voucher';
 const PAYMENT_TYPE_SPLIT_VOUCHER = 'split_voucher';
 const INVALID_CUSTOMER_NAMES = new Set(['null', 'emporter', 'a emporter', 'aemporter', 'takeaway']);
-const seenBillNotificationKeys = new Map();
 
 const formatCurrency = (value) => {
   const amount = Number(value || 0);
@@ -127,44 +126,11 @@ const getTargetAccountLabelForMethod = (method) => {
   return '-';
 };
 
-const buildBillNotificationDedupKey = (orderId, billRequestedAt) => {
-  const normalizedOrderId = Number(orderId || 0);
-  const normalizedDate = String(billRequestedAt || '').trim();
-
-  if (normalizedOrderId <= 0 || normalizedDate === '') {
-    return '';
-  }
-
-  return `${normalizedOrderId}:${normalizedDate}`;
-};
-
-const shouldEmitBillNotification = (orderId, billRequestedAt) => {
-  const key = buildBillNotificationDedupKey(orderId, billRequestedAt);
-  if (!key) {
-    return false;
-  }
-
-  const now = Date.now();
-  const previousAt = Number(seenBillNotificationKeys.get(key) || 0);
-  if (previousAt > 0 && now - previousAt < BILL_NOTIFICATION_DEDUP_TTL_MS) {
-    return false;
-  }
-
-  seenBillNotificationKeys.set(key, now);
-
-  seenBillNotificationKeys.forEach((timestamp, existingKey) => {
-    if (now - Number(timestamp || 0) > BILL_NOTIFICATION_DEDUP_TTL_MS) {
-      seenBillNotificationKeys.delete(existingKey);
-    }
-  });
-
-  return true;
-};
-
 const getOrderTableLabel = (orderLike) => {
   if (String(orderLike?.order_type || '') === 'takeaway') {
     return 'A emporter';
   }
+  if (orderLike?.order_label) return orderLike.order_label;
 
   return orderLike?.table?.table_number ? `Table ${orderLike.table.table_number}` : 'Sans table';
 };
@@ -307,18 +273,18 @@ const buildInvoiceHtml = (invoice) => {
   const discountAmount = formatCurrency(invoice.discount_amount || 0);
   const total = formatCurrency(invoice.total);
   const completedAmount = formatCurrency(invoice.completed_amount ?? paymentSummary.completedAmount);
-  const remainingAmountValue = roundMoney(invoice.remaining_amount ?? paymentSummary.pendingAmount);
+  const remainingAmountValue = roundMoney(invoice.amount_to_collect ?? invoice.remaining_amount ?? paymentSummary.pendingAmount);
   const remainingAmount = formatCurrency(remainingAmountValue);
   const invoicePackaging = getPackagingDetails(invoice);
   const tableLabel = String(invoice?.order_type || '') === 'takeaway'
     ? 'A emporter'
-    : (invoice.table ? `Table ${invoice.table}` : 'Sans table');
+    : (invoice.order_label || (invoice.table ? `Table ${invoice.table}` : 'Sans table'));
   const customerLabel = invoice.customer || 'Client libre';
   const methodLabel = formatPaymentMethodLabel(payment?.method || '-');
   const settlementMethodLabel = formatPaymentMethodLabel(payment?.settlement_method || payment?.method || '-');
   const items = Array.isArray(invoice.items) ? invoice.items : [];
   const documentLabel = isCompleted ? 'Facture' : (isVoucher ? 'Bon client' : 'Addition');
-  const totalLabel = remainingAmountValue > 0
+  const totalLabel = !isCompleted
     ? (paymentSummary.completedAmount > 0 ? 'Reste a encaisser' : 'Total a encaisser')
     : 'Total encaisse';
 
@@ -354,8 +320,9 @@ const buildInvoiceHtml = (invoice) => {
     return `
         <div class="meta-row">
           <span>${escapeHtml(entryLabel)}</span>
-          <strong>${escapeHtml(formatCurrency(entry?.amount || 0))} · ${escapeHtml(entryMethod)}</strong>
+          <strong>${escapeHtml(formatCurrency(Number(entry?.amount || 0) - Number(entry?.deposit_amount || 0)))} · ${escapeHtml(entryMethod)}</strong>
         </div>
+        ${entry?.deposit_amount ? `<div class="meta-row"><span>Acompte de reservation</span><strong>${escapeHtml(formatCurrency(entry.deposit_amount))}</strong></div>` : ''}
       `;
   }).join('');
 
@@ -570,30 +537,6 @@ const printInvoiceDocument = (invoice) => {
   return true;
 };
 
-const buildLocalDayUtcRange = (dateInput) => {
-  const raw = String(dateInput || '').trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  const startLocal = new Date(year, month - 1, day, 0, 0, 0, 0);
-  const endLocal = new Date(year, month - 1, day, 23, 59, 59, 999);
-
-  if (Number.isNaN(startLocal.getTime()) || Number.isNaN(endLocal.getTime())) {
-    return null;
-  }
-
-  return {
-    from: startLocal.toISOString(),
-    to: endLocal.toISOString(),
-  };
-};
-
 const escapeHtml = (value) => String(value || '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -602,45 +545,8 @@ const escapeHtml = (value) => String(value || '')
   .replace(/'/g, '&#39;');
 
 const extractApiError = (error, fallbackMessage) => {
-  return error?.response?.data?.message || error?.response?.data?.error || fallbackMessage;
-};
-
-const requestBrowserNotificationPermission = async () => {
-  if (typeof window === 'undefined' || !('Notification' in window)) {
-    return false;
-  }
-
-  if (Notification.permission === 'granted') {
-    return true;
-  }
-
-  try {
-    const permission = await Notification.requestPermission();
-    return permission === 'granted';
-  } catch (_error) {
-    return false;
-  }
-};
-
-const isBrowserNotificationSupported = () => {
-  return typeof window !== 'undefined' && 'Notification' in window;
-};
-
-const getInitialCashierNotificationEnabled = () => {
-  if (!isBrowserNotificationSupported()) {
-    return false;
-  }
-
-  const stored = window.localStorage.getItem(CASHIER_NOTIFICATION_STORAGE_KEY);
-  if (stored !== null) {
-    return stored === '1' && Notification.permission === 'granted';
-  }
-
-  return Notification.permission === 'granted';
-};
-
-const getNotificationButtonLabel = (enabled) => {
-  return `Notif navigateur: ${enabled ? 'ON' : 'OFF'}`;
+  return Object.values(error?.response?.data?.errors || {}).flat().join(' ')
+    || error?.response?.data?.error || error?.response?.data?.message || fallbackMessage;
 };
 
 const getDiscountedAmount = (baseAmount, discountPercent) => {
@@ -652,8 +558,8 @@ const getDiscountedAmount = (baseAmount, discountPercent) => {
 
 const statusLabel = (status) => {
   const labels = {
-    ready: 'Prete',
-    served: 'Servie',
+    ready: 'A encaisser',
+    served: 'A encaisser',
     paid: 'Payee',
   };
 
@@ -727,17 +633,10 @@ const MessageBanner = ({ message }) => {
   );
 };
 
-export const CashierOverviewModule = () => {
+export const CashierOverviewModule = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
   const [stats, setStats] = useState({ total_revenue: 0, total_orders: 0, by_method: [], by_account: [], recent_customer_payments: [] });
-  const [readyOrders, setReadyOrders] = useState([]);
-  const [billNotifications, setBillNotifications] = useState([]);
-  const [browserNotificationEnabled, setBrowserNotificationEnabled] = useState(() => getInitialCashierNotificationEnabled());
-  const firstLoadRef = useRef(true);
-  const previousOrdersRef = useRef(new Map());
-
-  const billRequestsCount = readyOrders.filter((order) => Boolean(order?.bill_requested_at)).length;
 
   const loadDataInternal = useCallback(async (options = {}) => {
     const { silent = false } = options || {};
@@ -752,69 +651,9 @@ export const CashierOverviewModule = () => {
     }
 
     try {
-      const [statsRes, readyRes] = await Promise.all([
-        cashierAPI.getDayStats(),
-        cashierAPI.getReadyOrders({ include_items: 0 }),
-      ]);
+      const statsRes = await cashierAPI.getDayStats();
 
       setStats(statsRes.data || { total_revenue: 0, total_orders: 0, by_method: [], by_account: [], recent_customer_payments: [] });
-      const nextOrders = Array.isArray(readyRes.data) ? readyRes.data : [];
-
-      if (!firstLoadRef.current) {
-        const previousMap = previousOrdersRef.current;
-        const newEntries = [];
-
-        nextOrders.forEach((order) => {
-          const previous = previousMap.get(Number(order.id));
-          const previousBillRequestAt = String(previous?.bill_requested_at || '');
-          const currentBillRequestAt = String(order?.bill_requested_at || '');
-
-          if (
-            currentBillRequestAt
-            && currentBillRequestAt !== previousBillRequestAt
-            && shouldEmitBillNotification(order.id, currentBillRequestAt)
-          ) {
-            const tableLabel = getOrderTableLabel(order);
-            newEntries.push({
-              key: `bill-overview-${order.id}-${Date.now()}`,
-              orderId: order.id,
-              tableLabel,
-              createdAt: new Date().toISOString(),
-            });
-
-            playNotificationTone('new-order');
-
-            if (
-              browserNotificationEnabled
-              && typeof window !== 'undefined'
-              && 'Notification' in window
-              && Notification.permission === 'granted'
-            ) {
-              try {
-                new Notification(`Addition demandée · Commande #${order.id}`, {
-                  body: tableLabel,
-                });
-              } catch (_error) {
-                // Ignorer les erreurs de notification navigateur.
-              }
-            }
-          }
-        });
-
-        if (newEntries.length > 0) {
-          setBillNotifications((previous) => [...newEntries, ...previous].slice(0, 10));
-          setMessage({
-            type: 'success',
-            text: newEntries.length === 1
-              ? `Demande d'addition reçue pour la commande #${newEntries[0].orderId}.`
-              : `${newEntries.length} nouvelles demandes d'addition reçues.`,
-          });
-        }
-      }
-
-      setReadyOrders(nextOrders);
-      previousOrdersRef.current = new Map(nextOrders.map((item) => [Number(item.id), item]));
-      firstLoadRef.current = false;
     } catch (error) {
       if (!silent) {
         setMessage({
@@ -827,110 +666,34 @@ export const CashierOverviewModule = () => {
         setLoading(false);
       }
     }
-  }, [browserNotificationEnabled]);
+  }, []);
   const loadData = useSerializedAsyncCallback(loadDataInternal);
 
-  useEffect(() => {
-    loadData();
+  useCashierRefresh(loadData);
 
-    const intervalId = setInterval(() => {
-      loadData({ silent: true });
-    }, OVERVIEW_REFRESH_INTERVAL_MS);
 
-    return () => clearInterval(intervalId);
-  }, [loadData]);
-
-  useEffect(() => {
-    if (!isBrowserNotificationSupported()) {
-      return;
-    }
-
-    setBrowserNotificationEnabled(getInitialCashierNotificationEnabled());
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CASHIER_NOTIFICATION_STORAGE_KEY, browserNotificationEnabled ? '1' : '0');
-  }, [browserNotificationEnabled]);
-
-  const toggleBrowserNotifications = useCallback(async () => {
-    if (!isBrowserNotificationSupported()) {
-      setBrowserNotificationEnabled(false);
-      setMessage({
-        type: 'error',
-        text: 'Notifications navigateur non prises en charge sur cet appareil.',
-      });
-      return;
-    }
-
-    if (browserNotificationEnabled) {
-      setBrowserNotificationEnabled(false);
-      setMessage({
-        type: 'success',
-        text: 'Notifications navigateur désactivées pour la caisse sur ce navigateur.',
-      });
-      return;
-    }
-
-    const granted = await requestBrowserNotificationPermission();
-    setBrowserNotificationEnabled(granted);
-    setMessage({
-      type: granted ? 'success' : 'error',
-      text: granted
-        ? 'Notifications navigateur activées (caisse).'
-        : 'Notifications bloquées. Sur Firefox, autorisez-les dans la barre d’adresse puis réessayez.',
-    });
-  }, [browserNotificationEnabled]);
 
   if (loading) {
     return <div className="staff-card">Chargement des donnees caisse...</div>;
   }
-
   return (
-    <div className="staff-module-stack">
+    <div className="staff-module-stack cashier-overview">
       <MessageBanner message={message} />
-
-      {billNotifications.length > 0 ? (
-        <div className="staff-card staff-ready-feed">
-          <div className="staff-card-header compact">
-            <h3>Notifications addition</h3>
-            <button type="button" className="staff-btn secondary" onClick={() => setBillNotifications([])}>
-              Effacer
-            </button>
-          </div>
-          <div className="staff-ready-list">
-            {billNotifications.map((entry) => (
-              <div key={entry.key} className="staff-ready-item">
-                <strong>Commande #{entry.orderId}</strong>
-                <span>{entry.tableLabel} · Demande d'addition reçue</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       <div className="staff-stat-grid">
         <div className="staff-stat-card"><span>CA du jour</span><strong>{formatCurrency(stats.total_revenue)}</strong></div>
-        <div className="staff-stat-card"><span>Commandes payees</span><strong>{stats.total_orders || 0}</strong></div>
-        <div className="staff-stat-card"><span>A encaisser</span><strong>{readyOrders.length}</strong></div>
-        <div className="staff-stat-card"><span>Additions demandées</span><strong>{billRequestsCount}</strong></div>
         <div className="staff-stat-card"><span>Caisse disponible</span><strong>{formatCurrency(stats?.cash_register?.cash_available)}</strong></div>
-        <div className="staff-stat-card"><span>Entrées cash (jour)</span><strong>{formatCurrency(stats?.cash_register?.cash_in_approved)}</strong></div>
-        <div className="staff-stat-card"><span>Restaurant (jour)</span><strong>{formatCurrency(stats?.sales_breakdown?.restaurant)}</strong></div>
-        <div className="staff-stat-card"><span>Boissons (jour)</span><strong>{formatCurrency(stats?.sales_breakdown?.boissons)}</strong></div>
-        <div className="staff-stat-card"><span>Cocktails (jour)</span><strong>{formatCurrency(stats?.sales_breakdown?.cocktails)}</strong></div>
+        <div className="staff-stat-card"><span>Nombre de clients</span><strong>{stats.customer_count || 0}</strong></div>
+        <div className="staff-stat-card"><span>Boissons</span><strong>{formatCurrency(stats?.dashboard_sales?.drinks)}</strong></div>
+        <div className="staff-stat-card"><span>Plats</span><strong>{formatCurrency(stats?.dashboard_sales?.dishes)}</strong></div>
       </div>
+
+      {children}
 
       <div className="staff-card">
         <div className="staff-card-header">
           <h2>Repartition des encaissements</h2>
           <div className="staff-inline-actions">
-            <button type="button" className="staff-btn secondary" onClick={toggleBrowserNotifications}>
-              {getNotificationButtonLabel(browserNotificationEnabled)}
-            </button>
             <button type="button" className="staff-btn secondary" onClick={() => loadData()}>Actualiser</button>
           </div>
         </div>
@@ -969,7 +732,7 @@ export const CashierOverviewModule = () => {
         </div>
 
         {!Array.isArray(stats.recent_customer_payments) || stats.recent_customer_payments.length === 0 ? (
-          <p className="staff-muted">Aucun encaissement récent.</p>
+          <p className="staff-muted">Aucun encaissement aujourd'hui.</p>
         ) : (
           <div className="staff-table-wrap">
             <table className="staff-table">
@@ -994,7 +757,7 @@ export const CashierOverviewModule = () => {
                     <td data-label="Mode client">{formatPaymentMethodLabel(payment.method)}</td>
                     <td data-label="Mode encaisse">{formatPaymentMethodLabel(payment.settlement_method || payment.method)}</td>
                     <td data-label="Compte alimente">{payment.target_account_label || 'En attente'}</td>
-                    <td data-label="Montant">{formatCurrency(payment.amount)}</td>
+                    <td data-label="Montant">{formatCurrency(payment.collected_amount ?? payment.amount)}</td>
                     <td data-label="Date">{formatDateTime(payment.encashed_at || payment.created_at)}</td>
                   </tr>
                 ))}
@@ -1007,17 +770,17 @@ export const CashierOverviewModule = () => {
   );
 };
 
-export const CashierPaymentsModule = () => {
+export const CashierPaymentsModule = ({ orderId = null, scope = '', onPaymentValidated } = {}) => {
   const [loading, setLoading] = useState(true);
   const [processingOrderId, setProcessingOrderId] = useState(null);
   const [message, setMessage] = useState(null);
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [paymentForms, setPaymentForms] = useState({});
-  const [billNotifications, setBillNotifications] = useState([]);
-  const [browserNotificationEnabled, setBrowserNotificationEnabled] = useState(() => getInitialCashierNotificationEnabled());
-  const firstLoadRef = useRef(true);
-  const previousOrdersRef = useRef(new Map());
+  const [cashTender, setCashTender] = useState({});
+  const [cashReceipt, setCashReceipt] = useState(null);
+  const [deposits, setDeposits] = useState([]);
+  const [depositSelections, setDepositSelections] = useState({});
   const processingActionOrderIdsRef = useRef(new Set());
 
   const loadCustomers = useCallback(async () => {
@@ -1049,64 +812,18 @@ export const CashierPaymentsModule = () => {
     }
 
     try {
-      const response = await cashierAPI.getReadyOrders({ include_items: 0 });
+      const response = await cashierAPI.getReadyOrders({ include_items: orderId ? 1 : 0, ...(orderId ? { order_id: orderId } : {}), ...(scope ? { scope } : {}) });
       const nextOrders = Array.isArray(response.data) ? response.data : [];
 
-      if (!firstLoadRef.current) {
-        const previousMap = previousOrdersRef.current;
-        const newEntries = [];
-
-        nextOrders.forEach((order) => {
-          const previous = previousMap.get(Number(order.id));
-          const previousBillRequestAt = String(previous?.bill_requested_at || '');
-          const currentBillRequestAt = String(order?.bill_requested_at || '');
-
-          if (
-            currentBillRequestAt
-            && currentBillRequestAt !== previousBillRequestAt
-            && shouldEmitBillNotification(order.id, currentBillRequestAt)
-          ) {
-            const tableLabel = getOrderTableLabel(order);
-            newEntries.push({
-              key: `bill-${order.id}-${Date.now()}`,
-              orderId: order.id,
-              tableLabel,
-              createdAt: new Date().toISOString(),
-            });
-
-            playNotificationTone('new-order');
-
-            if (
-              browserNotificationEnabled
-              && typeof window !== 'undefined'
-              && 'Notification' in window
-              && Notification.permission === 'granted'
-            ) {
-              try {
-                new Notification(`Addition demandée · Commande #${order.id}`, {
-                  body: tableLabel,
-                });
-              } catch (_error) {
-                // Ignorer les erreurs de notification navigateur.
-              }
-            }
-          }
-        });
-
-        if (newEntries.length > 0) {
-          setBillNotifications((previous) => [...newEntries, ...previous].slice(0, 10));
-          setMessage({
-            type: 'success',
-            text: newEntries.length === 1
-              ? `Demande d'addition reçue pour la commande #${newEntries[0].orderId}.`
-              : `${newEntries.length} nouvelles demandes d'addition reçues.`,
-          });
+      setOrders(nextOrders);
+      if (orderId && cashierAPI.getReservationDeposits) {
+        try {
+          const depositResponse = await cashierAPI.getReservationDeposits();
+          setDeposits(depositResponse.data.filter((deposit) => deposit.available_amount > 0));
+        } catch (error) {
+          setMessage({ type: 'error', text: extractApiError(error, 'Impossible de charger les acomptes.') });
         }
       }
-
-      setOrders(nextOrders);
-      previousOrdersRef.current = new Map(nextOrders.map((item) => [Number(item.id), item]));
-      firstLoadRef.current = false;
 
       setPaymentForms((previous) => {
         const next = {};
@@ -1184,67 +901,23 @@ export const CashierPaymentsModule = () => {
         setLoading(false);
       }
     }
-  }, [browserNotificationEnabled]);
+  }, [orderId, scope]);
   const loadOrders = useSerializedAsyncCallback(loadOrdersInternal);
 
   useEffect(() => {
     loadCustomers();
   }, [loadCustomers]);
 
-  useEffect(() => {
-    loadOrders();
+  useCashierRefresh(loadOrders);
 
-    const intervalId = setInterval(() => {
-      loadOrders({ silent: true });
-    }, PAYMENTS_REFRESH_INTERVAL_MS);
+  const depositCredit = (order, form) => {
+    const pending = getOrderPaymentSummary(order).latestPendingPayment;
+    if (pending) return Number(pending.deposit_amount || 0);
+    return Math.min(Number(form.amount || 0), deposits.filter((deposit) => (depositSelections[order.id] || []).includes(deposit.id))
+      .reduce((sum, deposit) => sum + Number(deposit.available_amount), 0));
+  };
 
-    return () => clearInterval(intervalId);
-  }, [loadOrders]);
 
-  useEffect(() => {
-    if (!isBrowserNotificationSupported()) {
-      return;
-    }
-
-    setBrowserNotificationEnabled(getInitialCashierNotificationEnabled());
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CASHIER_NOTIFICATION_STORAGE_KEY, browserNotificationEnabled ? '1' : '0');
-  }, [browserNotificationEnabled]);
-
-  const toggleBrowserNotifications = useCallback(async () => {
-    if (!isBrowserNotificationSupported()) {
-      setBrowserNotificationEnabled(false);
-      setMessage({
-        type: 'error',
-        text: 'Notifications navigateur non prises en charge sur cet appareil.',
-      });
-      return;
-    }
-
-    if (browserNotificationEnabled) {
-      setBrowserNotificationEnabled(false);
-      setMessage({
-        type: 'success',
-        text: 'Notifications navigateur désactivées pour la caisse sur ce navigateur.',
-      });
-      return;
-    }
-
-    const granted = await requestBrowserNotificationPermission();
-    setBrowserNotificationEnabled(granted);
-    setMessage({
-      type: granted ? 'success' : 'error',
-      text: granted
-        ? 'Notifications navigateur activées (caisse).'
-        : 'Notifications bloquées. Sur Firefox, autorisez-les dans la barre d’adresse puis réessayez.',
-    });
-  }, [browserNotificationEnabled]);
 
   const updatePaymentField = (orderId, key, value) => {
     setPaymentForms((previous) => ({
@@ -1315,7 +988,7 @@ export const CashierPaymentsModule = () => {
         }
 
         if (key === 'split_immediate_amount') {
-          nextForm.split_immediate_amount = roundMoney(value);
+          nextForm.split_immediate_amount = value;
         }
 
         return nextForm;
@@ -1336,13 +1009,18 @@ export const CashierPaymentsModule = () => {
     const discountPercent = Math.max(0, Math.min(10, Number(form.discount_percent || 0)));
     const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, 'cash');
     const splitImmediateAmount = roundMoney(form.split_immediate_amount);
-    const amountDue = roundMoney(form.amount);
+    const amountDue = roundMoney(form.amount) - depositCredit(order, form);
     const method = isSplitVoucher
       ? splitImmediateMethod
       : (isVoucherPayment ? 'bon' : normalizeImmediatePaymentMethod(form.method, 'cash'));
     const isVoucherCustomerLocked = hasLockedVoucherCustomer(order);
     const customerId = getResolvedVoucherCustomerId(form, order);
     const customerName = getResolvedVoucherCustomerName(form);
+
+    if (isSplitVoucher && !isWholeAriary(form.split_immediate_amount)) {
+      setMessage({ type: 'error', text: 'Saisissez un montant entier en Ariary, sans decimales.' });
+      return;
+    }
 
     if ((isVoucherPayment || isSplitVoucher) && customerId <= 0 && customerName === '') {
       setMessage({ type: 'error', text: 'Un bon exige un client. Sélectionnez un client existant ou saisissez un nouveau client.' });
@@ -1373,6 +1051,7 @@ export const CashierPaymentsModule = () => {
         discount_percent: discountPercent,
         customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
         customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
+        ...(getPaymentWorkflowState(order) === 'to_print' ? { deposit_ids: depositSelections[order.id] || [] } : {}),
       });
 
       const invoiceResponse = await cashierAPI.generateInvoice(order.id);
@@ -1453,7 +1132,7 @@ export const CashierPaymentsModule = () => {
     const isVoucherPayment = workflowState !== 'voucher_pending' && paymentType === PAYMENT_TYPE_VOUCHER;
     const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, '');
     const splitImmediateAmount = roundMoney(form.split_immediate_amount);
-    const amountDue = roundMoney(form.amount);
+    const amountDue = roundMoney(form.amount) - depositCredit(order, form);
     const actualMethod = workflowState === 'voucher_pending'
       ? normalizeImmediatePaymentMethod(
         form.settlement_method,
@@ -1466,6 +1145,11 @@ export const CashierPaymentsModule = () => {
     const customerId = getResolvedVoucherCustomerId(form, order);
     const customerName = getResolvedVoucherCustomerName(form);
     const selectedMethod = isVoucherPayment ? 'bon' : normalizePaymentMethod(form.method || latestPayment?.method);
+
+    if (isSplitVoucher && !isWholeAriary(form.split_immediate_amount)) {
+      setMessage({ type: 'error', text: 'Saisissez un montant entier en Ariary, sans decimales.' });
+      return;
+    }
 
     if (workflowState === 'to_print') {
       setMessage({ type: 'error', text: 'Imprimez d’abord l’addition avant l’encaissement.' });
@@ -1508,14 +1192,21 @@ export const CashierPaymentsModule = () => {
       return;
     }
 
+    const tender = calculateCashTender(isSplitVoucher ? splitImmediateAmount : amountDue, cashTender[order.id]);
+    if (actualMethod === 'cash' && tender.error) {
+      setMessage({ type: 'error', text: tender.error });
+      return;
+    }
+
     processingActionOrderIdsRef.current.add(orderId);
     setProcessingOrderId(order.id);
     setMessage(null);
 
     try {
-      await cashierAPI.processPayment(order.id, isSplitVoucher
+      const paymentResponse = await cashierAPI.processPayment(order.id, isSplitVoucher
         ? {
           method: actualMethod,
+          expected_balance: amountDue,
           reference: form.reference || null,
           customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
           customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
@@ -1525,10 +1216,15 @@ export const CashierPaymentsModule = () => {
         }
         : {
           method: actualMethod,
+          expected_balance: amountDue,
           reference: form.reference || null,
           customer_id: !isVoucherCustomerLocked && customerId > 0 ? customerId : null,
           customer_name: !isVoucherCustomerLocked && customerId <= 0 && customerName !== '' ? customerName : null,
         });
+
+      setCashReceipt(actualMethod === 'cash' && tender.change != null
+        ? { orderId: order.id, change: tender.change } : null);
+      setCashTender((current) => { const next = { ...current }; delete next[order.id]; return next; });
 
       setMessage({
         type: 'success',
@@ -1540,6 +1236,8 @@ export const CashierPaymentsModule = () => {
       });
       await loadCustomers();
       await loadOrders({ silent: true });
+      notifyCashierChanged();
+      onPaymentValidated?.(paymentResponse.data);
     } catch (error) {
       setMessage({
         type: 'error',
@@ -1613,7 +1311,9 @@ export const CashierPaymentsModule = () => {
     const isVoucherPayment = !voucherSection && !isVoucherPending && paymentType === PAYMENT_TYPE_VOUCHER;
     const splitImmediateMethod = normalizeImmediatePaymentMethod(form.split_immediate_method, 'cash');
     const splitImmediateAmount = roundMoney(form.split_immediate_amount);
-    const splitRemainingAmount = roundMoney(Math.max(0, Number(form.amount || 0) - splitImmediateAmount));
+    const credit = depositCredit(order, form);
+    const amountToCollect = Math.max(0, Number(form.amount || 0) - credit);
+    const splitRemainingAmount = roundMoney(Math.max(0, amountToCollect - splitImmediateAmount));
     const completedAmount = roundMoney(paymentSummary.completedAmount);
     const pendingAmount = roundMoney(paymentSummary.pendingAmount || form.amount);
     const selectedCustomerId = getResolvedVoucherCustomerId(form, order);
@@ -1643,9 +1343,29 @@ export const CashierPaymentsModule = () => {
     const canManageVoucherTable = voucherSection && Number(order?.table_id || 0) > 0;
 
     return (
-      <article key={order.id} className="staff-payment-card">
+      <article key={order.id} className={`staff-payment-card cp-payment-card${orderId && order.items?.length ? ' has-recap' : ''}`}>
+        {orderId && order.items?.length ? <div className="cp-order-recap">
+          <h3>Commande</h3>
+          {order.items.map((item) => <div className="cp-recap-line" key={item.id}>
+            <div><strong>{item.menu?.name || 'Plat archive'}</strong>
+              <span>{item.quantity} x {formatCurrency(item.price_at_order)}</span></div>
+            <strong>{formatCurrency(Number(item.price_at_order) * Number(item.quantity))}</strong>
+          </div>)}
+          <div className="cp-recap-total"><span>Total des plats</span><strong>{formatCurrency(grossAmount)}</strong></div>
+        </div> : null}
         <header>
-          <div>
+          <div className="cp-ticket-heading">
+            {orderId ? <>
+              <span className="cp-ticket-location">{getOrderTableLabel(order)}</span>
+              <strong>Addition #{order.id}</strong>
+              <div className="cp-ticket-details">
+                <span>Total : {formatCurrency(grossAmount)}</span>
+                {discountPercent > 0 ? <span>Reduction : {discountPercent}%</span> : null}
+                {credit > 0 ? <span>Acompte : {formatCurrency(credit)}</span> : null}
+                {completedAmount > 0 ? <span>Deja regle : {formatCurrency(completedAmount)}</span> : null}
+                {displayedCustomerName ? <span>{displayedCustomerName}</span> : null}
+              </div>
+            </> : <>
             <strong>{voucherSection ? `Bon commande #${order.id}` : `Commande #${order.id}`}</strong>
             <span>
               {getOrderTableLabel(order)} · {formatCurrency(order.total_amount)}
@@ -1680,6 +1400,7 @@ export const CashierPaymentsModule = () => {
             <span>
               Total brut: {formatCurrency(grossAmount)} · Reduction: {discountPercent}% ({formatCurrency(discountAmount)})
             </span>
+            {credit > 0 ? <span>Acompte de reservation : {formatCurrency(credit)}</span> : null}
             {String(order?.order_type || '') === 'takeaway' ? (
               <span>
                 {packaging.enabled
@@ -1687,24 +1408,26 @@ export const CashierPaymentsModule = () => {
                   : 'Barquettes: non'}
               </span>
             ) : null}
+            </>}
           </div>
-          <StatusBadge status={order.status} />
+          <div className="cp-ticket-status"><StatusBadge status={order.status} />
+            <span>{workflowState === 'to_print' ? 'A imprimer' : isVoucherPending ? 'Bon en attente' : 'Addition imprimee'}</span></div>
         </header>
 
-        <div className="staff-payment-form-grid">
-          <label>
+        <div className="staff-payment-form-grid cp-payment-grid">
+          <label className="cp-amount-field">
             Montant
             <input
               type="number"
               min="0"
               step="1"
-              value={form.amount}
+              value={amountToCollect}
               onChange={(event) => updatePaymentField(order.id, 'amount', event.target.value)}
               readOnly
             />
           </label>
 
-          <label>
+          {!isPrinted ? <label>
             Reduction
             <select
               value={discountPercent}
@@ -1723,7 +1446,7 @@ export const CashierPaymentsModule = () => {
               <option value={9}>9%</option>
               <option value={10}>10%</option>
             </select>
-          </label>
+          </label> : null}
 
           <label>
             Reference
@@ -1734,6 +1457,15 @@ export const CashierPaymentsModule = () => {
               placeholder="Optionnel"
             />
           </label>
+
+          {!isPrinted && deposits.some((deposit) => !deposit.table_id || [Number(order.table_id), ...(order.linked_table_ids || [])].includes(Number(deposit.table_id))) ? <label>
+            Acompte de reservation
+            <select value={depositSelections[order.id]?.[0] || ''} onChange={(event) => setDepositSelections((current) => ({ ...current, [order.id]: event.target.value ? [Number(event.target.value)] : [] }))}>
+              <option value="">Aucun</option>
+              {deposits.filter((deposit) => !deposit.table_id || [Number(order.table_id), ...(order.linked_table_ids || [])].includes(Number(deposit.table_id))).map((deposit) =>
+                <option value={deposit.id} key={deposit.id}>{deposit.customer_name} / {formatDateTime(deposit.reservation_at)} / {formatCurrency(deposit.available_amount)}</option>)}
+            </select>
+          </label> : null}
 
           {!voucherSection && !isVoucherPending ? (
             <label className="staff-payment-field staff-payment-type-field">
@@ -1746,19 +1478,10 @@ export const CashierPaymentsModule = () => {
                 <option value={PAYMENT_TYPE_VOUCHER}>Bon client</option>
                 <option value={PAYMENT_TYPE_SPLIT_VOUCHER}>Paiement en 2 fois + bon client</option>
               </select>
-              <small className="staff-field-hint">
-                Simple, bon client total, ou première tranche avec reliquat en bon.
-              </small>
             </label>
           ) : null}
 
-          {isVoucherPayment ? (
-            !isAwaitingCollection ? (
-              <div className="staff-field-hint staff-payment-form-note">
-                Toute l&apos;addition sera imprimée en bon client et restera en attente d&apos;encaissement.
-              </div>
-            ) : null
-          ) : isSplitVoucher ? (
+          {isVoucherPayment ? null : isSplitVoucher ? (
             <>
               <label className="staff-payment-field">
                 {paymentLabel}
@@ -1770,18 +1493,14 @@ export const CashierPaymentsModule = () => {
                     <option key={methodOption.value} value={methodOption.value}>{methodOption.label}</option>
                   ))}
                 </select>
-                <small className="staff-field-hint">
-                  {accountPreviewLabel
-                    ? `Compte alimenté maintenant: ${accountPreviewLabel}.`
-                    : 'Choisissez le mode du premier paiement.'}
-                </small>
+                {accountPreviewLabel ? <small className="staff-field-hint">Compte : {accountPreviewLabel}</small> : null}
               </label>
 
               <label className="staff-payment-field">
                 Montant encaissé maintenant
                 <input
                   type="number"
-                  min="0.01"
+                  min="1"
                   step="1"
                   value={form.split_immediate_amount}
                   onChange={(event) => updatePaymentField(order.id, 'split_immediate_amount', event.target.value)}
@@ -1809,11 +1528,7 @@ export const CashierPaymentsModule = () => {
                   <option key={methodOption.value} value={methodOption.value}>{methodOption.label}</option>
                 ))}
               </select>
-              <small className="staff-field-hint">
-                {accountPreviewLabel
-                  ? `Compte alimenté: ${accountPreviewLabel}.`
-                  : 'Choisissez le mode pour déterminer le compte à alimenter (caisse, mobile money ou banque).'}
-              </small>
+              {accountPreviewLabel ? <small className="staff-field-hint">Compte : {accountPreviewLabel}</small> : null}
             </label>
           )}
 
@@ -1821,11 +1536,7 @@ export const CashierPaymentsModule = () => {
             <>
               {isVoucherCustomerLocked ? (
                 <div className="staff-field-hint staff-payment-form-note">
-                  {displayedCustomerName
-                    ? (completedAmount > 0
-                      ? `Client verrouillé sur le reliquat: ${displayedCustomerName}. Le 2e paiement restera rattaché au client de la 1re tranche.`
-                      : `Client verrouillé sur ce bon: ${displayedCustomerName}. L'encaissement restera rattaché à ce client.`)
-                    : 'Client déjà verrouillé sur ce bon.'}
+                  Client : {displayedCustomerName || 'Client du bon'}
                 </div>
               ) : (
                 <>
@@ -1841,13 +1552,6 @@ export const CashierPaymentsModule = () => {
                         <option key={customer.id} value={customer.id}>{customer.name}</option>
                       ))}
                     </select>
-                    <small className="staff-field-hint">
-                      {isRegisteredCustomerLocked
-                        ? 'Zone grisée tant qu’un nouveau client est saisi.'
-                        : customers.length > 0
-                        ? 'Choisissez ici un client déjà enregistré.'
-                        : 'Aucun client chargé pour le moment. Vous pouvez quand même saisir un nouveau client.'}
-                    </small>
                   </label>
 
                   <label>
@@ -1859,22 +1563,21 @@ export const CashierPaymentsModule = () => {
                       placeholder="Nom du nouveau client"
                       disabled={isNewCustomerLocked}
                     />
-                    <small className="staff-field-hint">
-                      {isNewCustomerLocked
-                        ? 'Zone grisée tant qu’un client enregistré est sélectionné.'
-                        : 'Si vous saisissez un nom ici, le client sera créé automatiquement pour ce bon.'}
-                    </small>
                   </label>
 
                   {!hasRegisteredCustomer && !typedCustomerName ? (
                     <div className="staff-field-hint staff-payment-form-note">
-                      Renseignez un client enregistré ou créez un nouveau client avant l’émission du bon.
+                      Client requis.
                     </div>
                   ) : null}
                 </>
               )}
             </>
           ) : null}
+          {paymentValue === 'cash' && !isVoucherPayment ? <CashTenderFields
+            due={isSplitVoucher ? splitImmediateAmount : amountToCollect}
+            value={cashTender[order.id] || ''} disabled={processingOrderId === order.id}
+            onChange={(value) => setCashTender((current) => ({ ...current, [order.id]: value }))} /> : null}
         </div>
 
         <footer className={canManageVoucherTable ? 'staff-payment-footer voucher-layout' : ''}>
@@ -1894,11 +1597,6 @@ export const CashierPaymentsModule = () => {
                   ? 'Traitement...'
                   : (order?.occupies_table ? 'Liberer table' : 'Table deja liberee')}
               </button>
-              <div className="staff-field-hint staff-payment-form-note">
-                {order?.occupies_table
-                  ? 'Le serveur peut encore ajouter des articles tant que la table n’est pas libérée.'
-                  : 'Après libération, cette ancienne commande ne doit plus recevoir de nouveaux articles.'}
-              </div>
             </div>
           ) : null}
 
@@ -1945,52 +1643,25 @@ export const CashierPaymentsModule = () => {
             ) : null}
           </div>
 
-          {wantsVoucherIssuance ? (
-            <div className="staff-field-hint staff-payment-form-note">
-              Le bon client sera imprimé et restera en attente d&apos;encaissement jusqu&apos;à validation par la caisse ou l&apos;admin.
-            </div>
-          ) : null}
-
-          {isSplitVoucher ? (
-            <div className="staff-field-hint staff-payment-form-note">
-              La validation encaissera le premier montant tout de suite, puis créera automatiquement un bon client pour le reliquat.
-            </div>
-          ) : null}
         </footer>
       </article>
     );
   };
 
   return (
-    <div className="staff-module-stack">
+    <div className={`staff-module-stack cp-workspace${orderId ? ' is-scoped' : ''}`}>
       <MessageBanner message={message} />
 
-      {billNotifications.length > 0 ? (
-        <div className="staff-card staff-ready-feed">
-          <div className="staff-card-header compact">
-            <h3>Notifications addition</h3>
-            <button type="button" className="staff-btn secondary" onClick={() => setBillNotifications([])}>
-              Effacer
-            </button>
-          </div>
-          <div className="staff-ready-list">
-            {billNotifications.map((entry) => (
-              <div key={entry.key} className="staff-ready-item">
-                <strong>Commande #{entry.orderId}</strong>
-                <span>{entry.tableLabel} · Demande d'addition reçue</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {cashReceipt ? <div className="staff-card staff-cash-receipt" role="status">
+        <span>Commande #{cashReceipt.orderId}</span>
+        <strong>Monnaie a rendre : {formatCurrency(cashReceipt.change)}</strong>
+        <button type="button" className="staff-btn secondary" onClick={() => setCashReceipt(null)}>Fermer</button>
+      </div> : null}
 
-      <div className="staff-card">
+      <div className="staff-card cp-payment-panel">
         <div className="staff-card-header">
-          <h2>Paiements en attente</h2>
+          <h2>{scope === 'vouchers' ? 'Bons a encaisser' : orderId ? 'Paiement' : 'Paiements en attente'}</h2>
           <div className="staff-inline-actions">
-            <button type="button" className="staff-btn secondary" onClick={toggleBrowserNotifications}>
-              {getNotificationButtonLabel(browserNotificationEnabled)}
-            </button>
             <button
               type="button"
               className="staff-btn secondary"
@@ -2019,17 +1690,15 @@ export const CashierPaymentsModule = () => {
 export const CashierHistoryModule = () => {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
-  const [historyDate, setHistoryDate] = useState('');
   const [payments, setPayments] = useState([]);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
 
-  const loadHistory = useCallback(async (dateValue) => {
+  const loadHistory = useCallback(async () => {
     setLoading(true);
     setMessage(null);
 
     try {
-      const range = dateValue ? buildLocalDayUtcRange(dateValue) : null;
-      const response = await cashierAPI.getPaymentHistory(range ? { from: range.from, to: range.to } : undefined);
+      const response = await cashierAPI.getPaymentHistory();
       const data = Array.isArray(response.data?.data)
         ? response.data.data
         : Array.isArray(response.data)
@@ -2048,7 +1717,7 @@ export const CashierHistoryModule = () => {
   }, []);
 
   useEffect(() => {
-    loadHistory('');
+    loadHistory();
   }, [loadHistory]);
 
   const loadInvoice = async (orderId, { printAfterLoad = false } = {}) => {
@@ -2116,23 +1785,7 @@ export const CashierHistoryModule = () => {
         <div className="staff-card-header">
           <h2>Historique paiements et bons</h2>
           <div className="staff-inline-actions">
-            <input
-              type="date"
-              className="staff-date-input"
-              value={historyDate}
-              onChange={(event) => setHistoryDate(event.target.value)}
-            />
-            <button type="button" className="staff-btn secondary" onClick={() => loadHistory(historyDate)}>Filtrer</button>
-            <button
-              type="button"
-              className="staff-btn secondary"
-              onClick={() => {
-                setHistoryDate('');
-                loadHistory('');
-              }}
-            >
-              Reinitialiser
-            </button>
+            <button type="button" className="staff-btn secondary" onClick={() => loadHistory()}>Actualiser</button>
           </div>
         </div>
 
@@ -2284,19 +1937,6 @@ export const CashierCashRegisterModule = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState(null);
-  const [summary, setSummary] = useState({
-    cash_in_approved: 0,
-    cash_out_approved: 0,
-    cash_out_pending: 0,
-    cash_available: 0,
-    pending_requests_count: 0,
-  });
-  const [revenueBreakdown, setRevenueBreakdown] = useState({
-    restaurant: 0,
-    boissons: 0,
-    cocktails: 0,
-    total: 0,
-  });
   const [pending, setPending] = useState([]);
   const [movements, setMovements] = useState([]);
   const [formData, setFormData] = useState({
@@ -2329,19 +1969,6 @@ export const CashierCashRegisterModule = () => {
     try {
       const response = await cashierAPI.getCashMovements();
       const data = response?.data || {};
-      setSummary(data.summary || {
-        cash_in_approved: 0,
-        cash_out_approved: 0,
-        cash_out_pending: 0,
-        cash_available: 0,
-        pending_requests_count: 0,
-      });
-      setRevenueBreakdown(data.revenue_breakdown_today || {
-        restaurant: 0,
-        boissons: 0,
-        cocktails: 0,
-        total: 0,
-      });
       setPending(Array.isArray(data.pending_withdrawals) ? data.pending_withdrawals : []);
       setMovements(Array.isArray(data.movements) ? data.movements : []);
     } catch (error) {
@@ -2357,23 +1984,15 @@ export const CashierCashRegisterModule = () => {
   }, []);
   const loadData = useSerializedAsyncCallback(loadDataInternal);
 
-  useEffect(() => {
-    loadData();
-
-    const intervalId = setInterval(() => {
-      loadData({ silent: true });
-    }, OVERVIEW_REFRESH_INTERVAL_MS);
-
-    return () => clearInterval(intervalId);
-  }, [loadData]);
+  useCashierRefresh(loadData);
 
   const submitWithdrawalRequest = async (event) => {
     event.preventDefault();
     setMessage(null);
 
-    const amount = roundMoney(formData.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setMessage({ type: 'error', text: 'Montant invalide.' });
+    const amount = Number(formData.amount);
+    if (!isWholeAriary(formData.amount) || amount <= 0) {
+      setMessage({ type: 'error', text: 'Saisissez un montant entier en Ariary, superieur a 0.' });
       return;
     }
 
@@ -2411,20 +2030,6 @@ export const CashierCashRegisterModule = () => {
     <div className="staff-module-stack">
       <MessageBanner message={message} />
 
-      <div className="staff-stat-grid">
-        <div className="staff-stat-card"><span>Caisse disponible</span><strong>{formatCurrency(summary.cash_available)}</strong></div>
-        <div className="staff-stat-card"><span>Entrees cash (jour)</span><strong>{formatCurrency(summary.cash_in_approved)}</strong></div>
-        <div className="staff-stat-card"><span>Sorties validees (jour)</span><strong>{formatCurrency(summary.cash_out_approved)}</strong></div>
-        <div className="staff-stat-card"><span>Sorties en attente (jour)</span><strong>{formatCurrency(summary.cash_out_pending)}</strong></div>
-      </div>
-
-      <div className="staff-stat-grid">
-        <div className="staff-stat-card"><span>Recettes Restaurant (jour)</span><strong>{formatCurrency(revenueBreakdown.restaurant)}</strong></div>
-        <div className="staff-stat-card"><span>Recettes Boissons (jour)</span><strong>{formatCurrency(revenueBreakdown.boissons)}</strong></div>
-        <div className="staff-stat-card"><span>Recettes Cocktails (jour)</span><strong>{formatCurrency(revenueBreakdown.cocktails)}</strong></div>
-        <div className="staff-stat-card"><span>Total Recettes (jour)</span><strong>{formatCurrency(revenueBreakdown.total)}</strong></div>
-      </div>
-
       <div className="staff-card">
         <div className="staff-card-header">
           <h2>Demander une sortie de caisse</h2>
@@ -2438,7 +2043,7 @@ export const CashierCashRegisterModule = () => {
             Montant (Ar)
             <input
               type="number"
-              min="0.01"
+              min="1"
               step="1"
               value={formData.amount}
               onChange={(event) => setFormData((prev) => ({ ...prev, amount: event.target.value }))}
@@ -2514,7 +2119,6 @@ export const CashierCashRegisterModule = () => {
 
       <div className="staff-card">
         <h2>Mouvements de caisse du jour</h2>
-        <p className="staff-muted">L&apos;historique complet des flux reste disponible côté administration.</p>
         {movements.length === 0 ? (
           <p className="staff-muted">Aucun mouvement enregistre aujourd&apos;hui.</p>
         ) : (

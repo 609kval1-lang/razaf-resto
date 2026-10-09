@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import { RAW_MATERIAL_UNIT_OPTIONS } from '../../utils/units';
+import { isWholeAriary, purchaseTotalAriary, roundAriary } from '../../utils/ariary';
 import DataTable from '../common/DataTable';
 import { useDialog } from '../common/DialogProvider';
 import { useToast } from '../common/ToastProvider';
@@ -54,7 +55,7 @@ const formatQty = (value) => {
 
   return qty.toLocaleString('fr-FR', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    maximumFractionDigits: 6,
   });
 };
 
@@ -111,6 +112,7 @@ const createExistingPurchaseDraft = () => ({
   purchased_at: getTodayDateInputValue(),
   reference: '',
   note: '',
+  update_reference_cost: false,
 });
 
 const RAW_MATERIAL_PURCHASE_SETTLEMENT_OPTIONS = [
@@ -165,7 +167,7 @@ const getRawMaterialCreateDraftTotal = (formData) => {
     return 0;
   }
 
-  return Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100;
+  return purchaseTotalAriary(quantity, unitPrice);
 };
 
 const getRawMaterialCreateDraftInitialPaid = (formData, totalAmount) => {
@@ -180,7 +182,7 @@ const getRawMaterialCreateDraftInitialPaid = (formData, totalAmount) => {
     return 0;
   }
 
-  return Math.round((Math.min(amount, totalAmount) + Number.EPSILON) * 100) / 100;
+  return roundAriary(amount);
 };
 
 const getRawMaterialExistingPurchaseTotal = (purchaseDraft) => {
@@ -191,14 +193,17 @@ const getRawMaterialExistingPurchaseTotal = (purchaseDraft) => {
     return 0;
   }
 
-  return Math.round((quantity * unitPrice + Number.EPSILON) * 100) / 100;
+  return purchaseTotalAriary(quantity, unitPrice);
 };
 
 const getRawMaterialExistingPurchaseInitialPaid = (purchaseDraft, totalAmount) => {
+  if (purchaseDraft?.payment_mode === 'cash') {
+    return totalAmount;
+  }
   const rawInitialPaid = purchaseDraft?.initial_paid_amount;
 
   if (rawInitialPaid === '' || rawInitialPaid === null || rawInitialPaid === undefined) {
-    return purchaseDraft?.payment_mode === 'cash' ? totalAmount : 0;
+    return 0;
   }
 
   const amount = Number(rawInitialPaid || 0);
@@ -206,7 +211,7 @@ const getRawMaterialExistingPurchaseInitialPaid = (purchaseDraft, totalAmount) =
     return 0;
   }
 
-  return Math.round((Math.min(amount, totalAmount) + Number.EPSILON) * 100) / 100;
+  return roundAriary(amount);
 };
 
 const extractTreasuryBalances = (treasurySnapshot) => {
@@ -255,7 +260,11 @@ const RawMaterialManagement = () => {
   const [editingMaterial, setEditingMaterial] = useState(null);
   const [formData, setFormData] = useState(() => createDefaultFormData(false));
   const [purchaseForm, setPurchaseForm] = useState(() => createExistingPurchaseDraft());
+  const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+  const [purchaseSaving, setPurchaseSaving] = useState(false);
+  const [purchaseError, setPurchaseError] = useState('');
   const [message, setMessage] = useState('');
+  const [modalError, setModalError] = useState('');
   const [treasuryBalances, setTreasuryBalances] = useState(DEFAULT_TREASURY_BALANCES);
   const lastToastKeyRef = useRef('');
   const purchaseSectionRef = useRef(null);
@@ -372,10 +381,9 @@ const RawMaterialManagement = () => {
     }
 
     if (hasPurchaseAction) {
+      setShowPurchaseForm(true);
       window.setTimeout(() => {
-        if (purchaseSectionRef.current) {
-          purchaseSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        purchaseSectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
       }, 80);
     }
 
@@ -495,7 +503,7 @@ const RawMaterialManagement = () => {
 
   const createPurchaseTotal = getRawMaterialCreateDraftTotal(formData);
   const createPurchaseInitialPaid = getRawMaterialCreateDraftInitialPaid(formData, createPurchaseTotal);
-  const createPurchaseRemaining = Math.max(0, Math.round(((createPurchaseTotal - createPurchaseInitialPaid) + Number.EPSILON) * 100) / 100);
+  const createPurchaseRemaining = Math.max(0, roundAriary((createPurchaseTotal - createPurchaseInitialPaid)));
   const createPurchaseSettlementValue = getRawMaterialPurchaseSettlementValue(formData.purchase_payment_method, formData.purchase_cash_source_account);
   const createPurchaseSettlementConfig = getRawMaterialPurchaseSettlementConfig(createPurchaseSettlementValue);
   const createPurchaseDebitBalance = Number(treasuryBalances?.[createPurchaseSettlementConfig.debit_account] || 0);
@@ -520,15 +528,28 @@ const RawMaterialManagement = () => {
       return suppliers;
     }
 
-    const filtered = suppliers.filter((supplier) => materialSupplierIds.includes(Number(supplier.id)));
-    return filtered.length > 0 ? filtered : suppliers;
+    return [...suppliers].sort((left, right) =>
+      Number(materialSupplierIds.includes(Number(right.id))) - Number(materialSupplierIds.includes(Number(left.id))));
   }, [selectedExistingPurchaseMaterial, suppliers]);
   const existingPurchaseTotal = getRawMaterialExistingPurchaseTotal(purchaseForm);
   const existingPurchaseInitialPaid = getRawMaterialExistingPurchaseInitialPaid(purchaseForm, existingPurchaseTotal);
-  const existingPurchaseRemaining = Math.max(0, Math.round(((existingPurchaseTotal - existingPurchaseInitialPaid) + Number.EPSILON) * 100) / 100);
+  const existingPurchaseRemaining = Math.max(0, roundAriary((existingPurchaseTotal - existingPurchaseInitialPaid)));
   const existingPurchaseSettlementValue = getRawMaterialPurchaseSettlementValue(purchaseForm.payment_method, purchaseForm.cash_source_account);
   const existingPurchaseSettlementConfig = getRawMaterialPurchaseSettlementConfig(existingPurchaseSettlementValue);
   const existingPurchaseDebitBalance = Number(treasuryBalances?.[existingPurchaseSettlementConfig.debit_account] || 0);
+
+  const openExistingPurchase = (material = null) => {
+    const linkedSupplierId = Number(material?.suppliers?.[0]?.id || 0);
+    setPurchaseForm({
+      ...createExistingPurchaseDraft(),
+      raw_material_id: material ? String(material.id) : '',
+      supplier_id: linkedSupplierId > 0 ? String(linkedSupplierId) : '',
+      unit_price: material ? String(material.cost || '') : '',
+    });
+    setPurchaseError('');
+    setShowPurchaseForm(true);
+    window.setTimeout(() => purchaseSectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 80);
+  };
 
   const alertMaterials = useMemo(() => {
     return materialsWithMeta
@@ -546,7 +567,7 @@ const RawMaterialManagement = () => {
 
     return (
       <div className="raw-material-portions">
-        <strong>{totalAvailablePortions} portion(s)</strong>
+        <strong>Jusqu'à {totalAvailablePortions} portion(s)</strong>
         <div className="raw-material-portions-list">
           {ingredients.map((ingredient) => (
             <span key={`${material.id}-${ingredient.id}`}>
@@ -658,7 +679,6 @@ const RawMaterialManagement = () => {
       searchAccessor: (material) => getStockStatusLabel(material.stockStatus),
       render: (material) => (
         <span className={`stock-status ${material.stockStatus}`}>
-          {material.stockStatus === 'low' ? '🔴 ' : material.stockStatus === 'warning' ? '🟡 ' : '🟢 '}
           {getStockStatusLabel(material.stockStatus)}
         </span>
       ),
@@ -670,11 +690,14 @@ const RawMaterialManagement = () => {
       searchable: false,
       render: (material) => (
         <div className="actions">
+          <button className="btn btn-primary btn-sm" onClick={() => openExistingPurchase(material)}>
+            Acheter
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(material)}>
-            ✏️
+            Modifier
           </button>
           <button className="btn btn-danger btn-sm" onClick={() => requestDelete(material)}>
-            🗑️
+            Supprimer
           </button>
         </div>
       ),
@@ -761,8 +784,80 @@ const RawMaterialManagement = () => {
     });
   };
 
+  const handleExistingPurchaseSubmit = async (event) => {
+    event.preventDefault();
+    if (purchaseSaving) return;
+    setPurchaseError('');
+
+    const supplierId = Number(purchaseForm.supplier_id);
+    const materialId = Number(purchaseForm.raw_material_id);
+    const quantity = Number(purchaseForm.quantity);
+    const unitPrice = Number(purchaseForm.unit_price);
+    if (!supplierId || !materialId || !selectedExistingPurchaseSupplier || !selectedExistingPurchaseMaterial) {
+      setPurchaseError('Sélectionnez une matière première et un fournisseur.');
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0 || Number(quantity.toFixed(3)) !== quantity) {
+      setPurchaseError('La quantité doit être positive avec trois décimales au maximum.');
+      return;
+    }
+    if (!isWholeAriary(unitPrice) || unitPrice <= 0 || existingPurchaseTotal <= 0) {
+      setPurchaseError('Le prix unitaire et le total doivent être des Ariary entiers positifs.');
+      return;
+    }
+
+    const initialPaid = purchaseForm.payment_mode === 'cash'
+      ? existingPurchaseTotal
+      : Number(purchaseForm.initial_paid_amount || 0);
+    if (!isWholeAriary(initialPaid) || initialPaid < 0 || initialPaid > existingPurchaseTotal) {
+      setPurchaseError('Le paiement initial doit être entier et compris entre zéro et le total.');
+      return;
+    }
+    const remaining = existingPurchaseTotal - initialPaid;
+    if (remaining > 0 && !purchaseForm.due_date) {
+      setPurchaseError('Indiquez une échéance pour le reste à payer.');
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Confirmer l’achat fournisseur',
+      message: `${selectedExistingPurchaseMaterial.name} : ${formatQty(quantity)} ${selectedExistingPurchaseMaterial.unit} pour ${formatAr(existingPurchaseTotal)}. Paiement immédiat : ${formatAr(initialPaid)}. Reste à payer : ${formatAr(remaining)}.`,
+      confirmText: 'Enregistrer l’achat',
+      cancelText: 'Annuler',
+      tone: 'primary',
+    });
+    if (!approved) return;
+
+    setPurchaseSaving(true);
+    try {
+      await adminAPI.createSupplierPurchase(supplierId, {
+        raw_material_id: materialId,
+        quantity,
+        unit_price: unitPrice,
+        payment_mode: purchaseForm.payment_mode,
+        initial_paid_amount: initialPaid,
+        payment_method: existingPurchaseSettlementConfig.payment_method,
+        cash_source_account: existingPurchaseSettlementConfig.cash_source_account,
+        due_date: remaining > 0 ? purchaseForm.due_date : null,
+        purchased_at: purchaseForm.purchased_at,
+        reference: String(purchaseForm.reference || '').trim() || null,
+        note: String(purchaseForm.note || '').trim() || null,
+        update_reference_cost: Boolean(purchaseForm.update_reference_cost),
+      });
+      setPurchaseForm(createExistingPurchaseDraft());
+      setShowPurchaseForm(false);
+      setMessage('Achat enregistré : stock, dette et paiement initial actualisés.');
+      await Promise.all([loadMaterials(), loadSuppliers(), loadPriceVariations(), loadTreasuryBalances()]);
+    } catch (error) {
+      setPurchaseError(extractErrorMessage(error, 'Achat impossible ; vérifiez les montants et le compte de paiement.'));
+    } finally {
+      setPurchaseSaving(false);
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setModalError('');
 
     try {
       const stockValue = Number(formData.stock || 0);
@@ -770,27 +865,27 @@ const RawMaterialManagement = () => {
       const reorderLevelValue = Number(formData.reorder_level || 0);
 
       if (!Number.isFinite(stockValue) || stockValue < 0) {
-        setMessage('Erreur: le stock doit etre un nombre positif');
+        setModalError('Le stock doit etre un nombre positif ou nul.');
         return;
       }
 
-      if (!Number.isFinite(costValue) || costValue < 0) {
-        setMessage('Erreur: le cout unitaire doit etre un nombre positif');
+      if (!isWholeAriary(costValue) || costValue < 0) {
+        setModalError('Le cout unitaire doit etre un montant entier en Ariary.');
         return;
       }
 
       if (!Number.isFinite(reorderLevelValue) || reorderLevelValue < 0) {
-        setMessage('Erreur: le seuil de reapprovisionnement doit etre un nombre positif');
+        setModalError('Le seuil de reapprovisionnement doit etre un nombre positif.');
         return;
       }
 
-      if (!editingMaterial && stockValue < 0) {
-        setMessage('Erreur: le stock initial doit etre un nombre positif ou nul');
+      if (!editingMaterial && stockValue <= 0) {
+        setModalError('Le stock initial doit etre superieur a 0 pour enregistrer l\'achat initial.');
         return;
       }
 
       if (!editingMaterial && costValue <= 0) {
-        setMessage('Erreur: le cout unitaire doit etre superieur a 0');
+        setModalError('Le cout unitaire doit etre superieur a 0.');
         return;
       }
 
@@ -820,8 +915,8 @@ const RawMaterialManagement = () => {
               ? costValue
               : Number(formData.purchase_unit_price);
 
-            if (!Number.isFinite(purchaseUnitPrice) || purchaseUnitPrice < 0) {
-              setMessage('Erreur: le prix d\'achat doit etre un nombre positif');
+            if (!isWholeAriary(purchaseUnitPrice) || purchaseUnitPrice < 0) {
+              setModalError('Le prix d\'achat doit etre un montant entier en Ariary.');
               return;
             }
 
@@ -860,7 +955,7 @@ const RawMaterialManagement = () => {
         if (formData.supplier_mode === 'existing') {
           const supplierId = Number(formData.supplier_id);
           if (!Number.isFinite(supplierId) || supplierId <= 0) {
-            setMessage('Erreur: sélectionnez un fournisseur existant');
+            setModalError('Selectionnez un fournisseur existant.');
             return;
           }
 
@@ -868,7 +963,7 @@ const RawMaterialManagement = () => {
         } else {
           const supplierName = String(formData.new_supplier_name || '').trim();
           if (!supplierName) {
-            setMessage('Erreur: le nom du nouveau fournisseur est obligatoire');
+            setModalError('Le nom du nouveau fournisseur est obligatoire.');
             return;
           }
 
@@ -886,15 +981,19 @@ const RawMaterialManagement = () => {
           : null;
         const rawInitialPaidAmount = purchasePaymentMode === 'cash'
           ? createPurchaseTotal
-          : createPurchaseInitialPaid;
-        const initialPaidAmount = Math.max(0, Math.min(createPurchaseTotal, Number(rawInitialPaidAmount || 0)));
-        const remainingAmount = Math.max(0, Math.round(((createPurchaseTotal - initialPaidAmount) + Number.EPSILON) * 100) / 100);
+          : Number(formData.purchase_initial_paid_amount || 0);
+        if (!isWholeAriary(rawInitialPaidAmount) || rawInitialPaidAmount < 0 || rawInitialPaidAmount > createPurchaseTotal) {
+          setModalError('Le paiement initial doit etre compris entre 0 et le total de l\'achat.');
+          return;
+        }
+        const initialPaidAmount = roundAriary(rawInitialPaidAmount);
+        const remainingAmount = Math.max(0, roundAriary((createPurchaseTotal - initialPaidAmount)));
         const purchaseDueDate = remainingAmount > 0
           ? (formData.purchase_due_date ? String(formData.purchase_due_date) : null)
           : null;
 
         if (remainingAmount > 0 && !purchaseDueDate) {
-          setMessage('Erreur: une date d\'echeance est obligatoire si la matiere premiere n\'est pas reglee integralement.');
+          setModalError('Une date d\'echeance est obligatoire si la matiere premiere n\'est pas reglee integralement.');
           return;
         }
 
@@ -910,11 +1009,12 @@ const RawMaterialManagement = () => {
         setMessage('Matière première créée avec achat fournisseur initial enregistré');
       }
 
+      setModalError('');
       setShowModal(false);
       resetForm();
       await Promise.all([loadMaterials(), loadSuppliers(), loadPriceVariations()]);
     } catch (error) {
-      setMessage(`Erreur: ${extractErrorMessage(error, 'Erreur lors de la sauvegarde')}`);
+      setModalError(extractErrorMessage(error, 'Erreur lors de la sauvegarde'));
     }
   };
 
@@ -936,6 +1036,7 @@ const RawMaterialManagement = () => {
       purchase_unit_price: Number(material.cost || 0),
       stock_update_mode: 'purchase',
     });
+    setModalError('');
     setShowModal(true);
   };
 
@@ -961,6 +1062,7 @@ const RawMaterialManagement = () => {
   const resetForm = () => {
     setFormData(createDefaultFormData(suppliers.length > 0));
     setEditingMaterial(null);
+    setModalError('');
   };
 
   const openCreateModal = () => {
@@ -980,13 +1082,16 @@ const RawMaterialManagement = () => {
     <div>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '10px', flexWrap: 'wrap' }}>
-          <h2>📦 Gestion des Matières Premières</h2>
+          <h2>Gestion des Matières Premières</h2>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={() => setShowAlertModal(true)} disabled={stockSummary.alertCount === 0}>
-              ⚠️ Alertes stock brut ({stockSummary.alertCount})
+              Alertes stock brut ({stockSummary.alertCount})
             </button>
             <button className="btn btn-primary" onClick={openCreateModal}>
-              ➕ Ajouter Matière Première
+              Ajouter Matière Première
+            </button>
+            <button className="btn btn-secondary" onClick={() => openExistingPurchase()} disabled={materials.length === 0 || suppliers.length === 0}>
+              Enregistrer un achat
             </button>
           </div>
         </div>
@@ -1026,8 +1131,132 @@ const RawMaterialManagement = () => {
         />
       </div>
 
+      {showPurchaseForm ? (
+        <div className="card admin-purchase-card" ref={purchaseSectionRef}>
+          <div className="admin-purchase-heading">
+            <h3>Achat d'une matière existante</h3>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPurchaseForm(false)} disabled={purchaseSaving}>
+              Fermer
+            </button>
+          </div>
+          {purchaseError ? <div className="message error-message" role="alert">{purchaseError}</div> : null}
+          <form onSubmit={handleExistingPurchaseSubmit}>
+            <div className="admin-purchase-grid">
+              <div className="form-group">
+                <label htmlFor="purchase-material">Matière première</label>
+                <select id="purchase-material" value={purchaseForm.raw_material_id} required
+                  onChange={(event) => {
+                    const material = materials.find((row) => String(row.id) === event.target.value);
+                    setPurchaseForm((previous) => ({
+                      ...previous,
+                      raw_material_id: event.target.value,
+                      supplier_id: material?.suppliers?.[0]?.id ? String(material.suppliers[0].id) : '',
+                      unit_price: material ? String(material.cost || '') : '',
+                    }));
+                  }}>
+                  <option value="">Choisir une matière</option>
+                  {materials.map((material) => <option key={material.id} value={material.id}>{material.name} ({material.unit})</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-supplier">Fournisseur</label>
+                <select id="purchase-supplier" value={purchaseForm.supplier_id} required
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, supplier_id: event.target.value }))}>
+                  <option value="">Choisir un fournisseur</option>
+                  {existingPurchaseSuggestedSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                </select>
+                {selectedExistingPurchaseSupplier && selectedExistingPurchaseMaterial ? (
+                  <span className="form-hint">L'achat liera ce fournisseur à la matière si nécessaire.</span>
+                ) : null}
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-quantity">Quantité ({selectedExistingPurchaseMaterial?.unit || 'unité'})</label>
+                <input id="purchase-quantity" type="number" min="0.001" step="0.001" required value={purchaseForm.quantity}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, quantity: event.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-unit-price">Prix d'achat par unité (Ar)</label>
+                <input id="purchase-unit-price" type="number" min="1" step="1" required value={purchaseForm.unit_price}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, unit_price: event.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-payment-mode">Règlement</label>
+                <select id="purchase-payment-mode" value={purchaseForm.payment_mode}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, payment_mode: event.target.value }))}>
+                  <option value="credit">À crédit ou partiel</option>
+                  <option value="cash">Payé intégralement</option>
+                </select>
+              </div>
+              {purchaseForm.payment_mode === 'credit' ? (
+                <div className="form-group">
+                  <label htmlFor="purchase-initial-paid">Paiement initial (Ar)</label>
+                  <input id="purchase-initial-paid" type="number" min="0" step="1" value={purchaseForm.initial_paid_amount}
+                    onChange={(event) => setPurchaseForm((previous) => ({ ...previous, initial_paid_amount: event.target.value }))} />
+                </div>
+              ) : null}
+              {existingPurchaseInitialPaid > 0 ? (
+                <div className="form-group">
+                  <label htmlFor="purchase-settlement">Compte débité</label>
+                  <select id="purchase-settlement" value={existingPurchaseSettlementValue}
+                    onChange={(event) => {
+                      const selected = getRawMaterialPurchaseSettlementConfig(event.target.value);
+                      setPurchaseForm((previous) => ({ ...previous, payment_method: selected.payment_method,
+                        cash_source_account: selected.cash_source_account || 'cash' }));
+                    }}>
+                    {RAW_MATERIAL_PURCHASE_SETTLEMENT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <span className="form-hint">Solde affiché : {formatAr(existingPurchaseDebitBalance)}</span>
+                </div>
+              ) : null}
+              {existingPurchaseRemaining > 0 ? (
+                <div className="form-group">
+                  <label htmlFor="purchase-due-date">Échéance</label>
+                  <input id="purchase-due-date" type="date" required value={purchaseForm.due_date}
+                    onChange={(event) => setPurchaseForm((previous) => ({ ...previous, due_date: event.target.value }))} />
+                </div>
+              ) : null}
+              <div className="form-group">
+                <label htmlFor="purchase-date">Date d'achat</label>
+                <input id="purchase-date" type="date" required value={purchaseForm.purchased_at}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, purchased_at: event.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-reference">Référence de paiement</label>
+                <input id="purchase-reference" type="text" maxLength="120" value={purchaseForm.reference}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, reference: event.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="purchase-note">Note d'achat</label>
+                <input id="purchase-note" type="text" maxLength="1000" value={purchaseForm.note}
+                  onChange={(event) => setPurchaseForm((previous) => ({ ...previous, note: event.target.value }))} />
+              </div>
+            </div>
+
+            <label className="admin-purchase-cost-choice">
+              <input type="checkbox" checked={Boolean(purchaseForm.update_reference_cost)}
+                onChange={(event) => setPurchaseForm((previous) => ({ ...previous, update_reference_cost: event.target.checked }))} />
+              <span>Utiliser le prix d'achat comme nouveau coût de référence pour les ingrédients et les marges</span>
+            </label>
+            {selectedExistingPurchaseMaterial ? (
+              <p className="form-hint">Coût de référence actuel : {formatAr(selectedExistingPurchaseMaterial.cost)} / {selectedExistingPurchaseMaterial.unit}. Le prix de vente des plats ne change pas.</p>
+            ) : null}
+            <div className="admin-purchase-totals" aria-live="polite">
+              <span>Total achat : <strong>{formatAr(existingPurchaseTotal)}</strong></span>
+              <span>Payé maintenant : <strong>{formatAr(existingPurchaseInitialPaid)}</strong></span>
+              <span>Dette restante : <strong>{formatAr(existingPurchaseRemaining)}</strong></span>
+            </div>
+            <div className="form-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseForm(false)} disabled={purchaseSaving}>Annuler</button>
+              <button type="submit" className="btn btn-primary" disabled={purchaseSaving}>
+                {purchaseSaving ? 'Enregistrement...' : 'Confirmer l’achat'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       <div className="card">
-        <h3>🧾 Variation coût matières premières</h3>
+        <h3>Variation coût matières premières</h3>
         <div className="pricing-insights-grid">
           <div className="pricing-insight-card up">
             <span>En hausse</span>
@@ -1065,10 +1294,17 @@ const RawMaterialManagement = () => {
               <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             </div>
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} aria-label="Matiere premiere">
+              {modalError ? (
+                <div className="message error-message" style={{ marginBottom: '12px' }}>
+                  {modalError}
+                </div>
+              ) : null}
+
               <div className="form-group">
-                <label>Nom</label>
+                <label htmlFor="raw-material-name">Nom</label>
                 <input
+                  id="raw-material-name"
                   type="text"
                   value={formData.name}
                   onChange={(event) => setFormData({ ...formData, name: event.target.value })}
@@ -1088,11 +1324,12 @@ const RawMaterialManagement = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Stock disponible</label>
+                  <label htmlFor="raw-material-stock">Stock disponible</label>
                   <input
+                    id="raw-material-stock"
                     type="number"
                     min="0"
-                    step="0.01"
+                    step={editingMaterial ? '0.000001' : '0.001'}
                     value={formData.stock}
                     onChange={(event) => setFormData({ ...formData, stock: event.target.value })}
                     required
@@ -1117,11 +1354,12 @@ const RawMaterialManagement = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Coût unitaire (Ar)</label>
+                  <label htmlFor="raw-material-cost">Coût unitaire (Ar)</label>
                   <input
+                    id="raw-material-cost"
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     value={formData.cost}
                     onChange={(event) => setFormData({ ...formData, cost: event.target.value })}
                     required
@@ -1156,9 +1394,6 @@ const RawMaterialManagement = () => {
                         </option>
                       ))}
                     </select>
-                    <div className="form-hint">
-                      Choisissez un fournisseur pour ce réapprovisionnement ou pour lier cette matière à un nouveau fournisseur.
-                    </div>
                   </div>
 
                   {isEditStockIncrease ? (
@@ -1195,17 +1430,13 @@ const RawMaterialManagement = () => {
                           <input
                             type="number"
                             min="0"
-                            step="0.01"
+                            step="1"
                             value={formData.purchase_unit_price}
                             onChange={(event) => setFormData((previous) => ({ ...previous, purchase_unit_price: event.target.value }))}
                             required
                           />
                         </div>
-                      ) : (
-                        <div className="form-hint" style={{ marginBottom: '12px' }}>
-                          Aucun achat fournisseur ne sera créé pour cet ajout de stock.
-                        </div>
-                      )}
+                      ) : null}
                     </>
                   ) : null}
                 </>
@@ -1242,8 +1473,9 @@ const RawMaterialManagement = () => {
 
                   {formData.supplier_mode === 'existing' ? (
                     <div className="form-group">
-                      <label>Choisir un fournisseur</label>
+                      <label htmlFor="raw-material-supplier">Choisir un fournisseur</label>
                       <select
+                        id="raw-material-supplier"
                         value={formData.supplier_id}
                         onChange={(event) => setFormData((previous) => ({ ...previous, supplier_id: event.target.value }))}
                         required
@@ -1256,7 +1488,7 @@ const RawMaterialManagement = () => {
                         ))}
                       </select>
                       {suppliers.length === 0 ? (
-                        <div className="form-hint">Aucun fournisseur disponible. Créez-en un nouveau ci-dessous.</div>
+                        <div className="form-hint">Aucun fournisseur disponible.</div>
                       ) : null}
                     </div>
                   ) : (
@@ -1295,9 +1527,6 @@ const RawMaterialManagement = () => {
 
                   <div className="card" style={{ margin: 0, marginTop: '10px', padding: '12px' }}>
                     <h4 style={{ marginBottom: '8px' }}>Achat initial et mode de paiement</h4>
-                    <p className="form-hint" style={{ marginBottom: '10px' }}>
-                      La création d&apos;une matière première enregistre automatiquement un achat fournisseur initial.
-                    </p>
 
                     <div className="form-group">
                       <label>Mode de paiement initial</label>
@@ -1345,15 +1574,12 @@ const RawMaterialManagement = () => {
                         <input
                           type="number"
                           min="0"
-                          step="0.01"
+                          step="1"
                           value={formData.purchase_payment_mode === 'cash' ? createPurchaseTotal : formData.purchase_initial_paid_amount}
                           onChange={(event) => updateCreatePurchaseField('purchase_initial_paid_amount', event.target.value)}
                           disabled={formData.purchase_payment_mode === 'cash'}
                           placeholder={formData.purchase_payment_mode === 'cash' ? 'Paiement total automatique' : '0'}
                         />
-                        {formData.purchase_payment_mode === 'cash' ? (
-                          <div className="form-hint">Le paiement comptant règle automatiquement la totalité.</div>
-                        ) : null}
                       </div>
                     </div>
 
@@ -1367,9 +1593,6 @@ const RawMaterialManagement = () => {
                           disabled={createPurchaseRemaining <= 0}
                           required={createPurchaseRemaining > 0}
                         />
-                        <div className="form-hint">
-                          Requise uniquement s&apos;il reste un montant à payer.
-                        </div>
                       </div>
 
                       <div className="form-group">
@@ -1420,7 +1643,7 @@ const RawMaterialManagement = () => {
         <div className="modal-overlay" onClick={() => setShowAlertModal(false)}>
           <div className="modal modal-alert" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h3>⚠️ Alertes du stock brut</h3>
+              <h3>Alertes du stock brut</h3>
               <button className="modal-close" onClick={() => setShowAlertModal(false)}>×</button>
             </div>
 
@@ -1437,7 +1660,6 @@ const RawMaterialManagement = () => {
                       </p>
                     </div>
                     <span className={`stock-status ${material.stockStatus}`}>
-                      {material.stockStatus === 'low' ? '🔴 ' : '🟡 '}
                       {getStockStatusLabel(material.stockStatus)}
                     </span>
                   </div>

@@ -78,3 +78,13 @@ export const convertUnitValue = (value, fromUnit, toUnit) => {
   const inBase = Number(value || 0) * from.factor;
   return inBase / to.factor;
 };
+
+export const calculatePortionCapacity = (stockInPortionUnit, portionSize) => {
+  const size = Number(portionSize);
+  const stock = Number(stockInPortionUnit);
+  if (!Number.isFinite(stock) || !Number.isFinite(size) || size <= 0) return 0;
+
+  const ratio = stock / size;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(ratio)) * 8;
+  return Math.max(0, Math.floor(ratio + tolerance));
+};

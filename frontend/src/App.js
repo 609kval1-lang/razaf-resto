@@ -44,10 +44,8 @@ function App() {
             <div className="App">
               <Suspense fallback={<RouteLoader />}>
                 <Routes>
-                  {/* Route de connexion - accessible sans authentification */}
                   <Route path="/login" element={<Login />} />
 
-                  {/* Routes protégées pour l'admin */}
                   <Route
                     path="/admin/*"
                     element={
@@ -57,23 +55,6 @@ function App() {
                     }
                   />
 
-                  {/* Routes protégées par rôle */}
-                  <Route
-                    path="/server/*"
-                    element={
-                      <ProtectedRoute allowedRoles={['server']}>
-                        <StaffDashboard role="server" />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/kitchen/*"
-                    element={
-                      <ProtectedRoute allowedRoles={['kitchen']}>
-                        <StaffDashboard role="kitchen" />
-                      </ProtectedRoute>
-                    }
-                  />
                   <Route
                     path="/cashier/*"
                     element={
@@ -82,19 +63,9 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
-                  <Route
-                    path="/bar/*"
-                    element={
-                      <ProtectedRoute allowedRoles={['barman']}>
-                        <StaffDashboard role="barman" />
-                      </ProtectedRoute>
-                    }
-                  />
 
-                  {/* Route par défaut - redirection selon rôle */}
                   <Route path="/" element={<RoleIndexRedirect />} />
 
-                  {/* Route catch-all - redirection selon rôle */}
                   <Route path="*" element={<RoleIndexRedirect />} />
                 </Routes>
               </Suspense>

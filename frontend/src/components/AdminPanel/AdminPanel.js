@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { adminAPI } from '../../services/api';
 import UserManagement from './UserManagement';
@@ -13,67 +13,48 @@ import CashMovementManagement from './CashMovementManagement';
 import RevenueDashboard from './RevenueDashboard';
 import TreasuryManagement from './TreasuryManagement';
 import ChangePasswordModal from '../common/ChangePasswordModal';
+import WorkspaceHeader from '../common/WorkspaceHeader';
 import './AdminPanel.css';
+import '../common/RestaurantWorkspace.css';
+import './AdminShell.css';
 
-const sidebarGroups = [
-  {
-    id: 'room',
-    label: 'Salle',
-    subLabel: 'Tables et réservations',
-    icon: '🍽️',
-    items: [
-      { id: 'tables', label: 'Tables et réservations', icon: '🪑', path: '/admin/tables' },
-    ],
-  },
+const navigationGroups = [
+  { path: '/admin', label: 'Tableau de bord' },
+  { path: '/admin/tables', label: 'Tables et réservations' },
   {
     id: 'stock',
     label: 'Stocks & achats',
-    subLabel: 'Matières premières et fournisseurs',
-    icon: '📦',
     items: [
-      { id: 'raw-materials', label: 'Matières premières', icon: '🧊', path: '/admin/raw-materials' },
-      { id: 'suppliers', label: 'Fournisseurs et achats', icon: '🚚', path: '/admin/suppliers' },
+      { id: 'raw-materials', label: 'Matières premières', path: '/admin/raw-materials' },
+      { id: 'suppliers', label: 'Fournisseurs et achats', path: '/admin/suppliers' },
     ],
   },
   {
     id: 'production',
     label: 'Menus & production',
-    subLabel: 'Menus et ingrédients',
-    icon: '📋',
     items: [
-      { id: 'menus', label: 'Menus et cartes', icon: '🍽️', path: '/admin/menus' },
-      { id: 'ingredients', label: 'Ingrédients préparés', icon: '🥄', path: '/admin/ingredients' },
+      { id: 'menus', label: 'Menus et cartes', path: '/admin/menus' },
+      { id: 'ingredients', label: 'Ingrédients préparés', path: '/admin/ingredients' },
     ],
   },
   {
     id: 'team',
     label: 'Équipe',
-    subLabel: 'Utilisateurs et paie',
-    icon: '👥',
     items: [
-      { id: 'users', label: 'Utilisateurs et accès', icon: '👤', path: '/admin/users' },
-      { id: 'employees', label: 'Employés et paie', icon: '💼', path: '/admin/employees' },
+      { id: 'users', label: 'Utilisateurs et accès', path: '/admin/users' },
+      { id: 'employees', label: 'Employés et paie', path: '/admin/employees' },
     ],
   },
   {
     id: 'finance',
     label: 'Finance',
-    subLabel: 'Trésorerie multi-comptes et validation caisse',
-    icon: '💰',
     items: [
-      { id: 'revenue', label: 'Recettes et analyses', icon: '📈', path: '/admin/revenue' },
-      { id: 'treasury', label: 'Trésorerie multi-comptes', icon: '🏛️', path: '/admin/treasury' },
-      { id: 'cash-movements', label: 'Caisse: demandes et validation', icon: '💸', path: '/admin/cash-movements' },
+      { id: 'revenue', label: 'Recettes et analyses', path: '/admin/revenue' },
+      { id: 'treasury', label: 'Trésorerie multi-comptes', path: '/admin/treasury' },
+      { id: 'cash-movements', label: 'Caisse: demandes et validation', path: '/admin/cash-movements' },
     ],
   },
 ];
-
-const matchesPath = (pathname, path) => pathname === path || (path !== '/admin' && pathname.startsWith(`${path}/`));
-
-const buildInitialOpenGroups = (pathname) => {
-  const activeGroup = sidebarGroups.find((group) => group.items.some((item) => matchesPath(pathname, item.path)));
-  return activeGroup ? { [activeGroup.id]: true } : {};
-};
 
 const getDashboardStockStatus = (stock, reorderLevel) => {
   const value = Number(stock || 0);
@@ -109,150 +90,27 @@ const AdminPanel = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [openGroups, setOpenGroups] = useState(() => buildInitialOpenGroups(location.pathname));
-
-  useEffect(() => {
-    setSidebarOpen(false);
-    setOpenGroups((current) => {
-      const activeGroup = sidebarGroups.find((group) => group.items.some((item) => matchesPath(location.pathname, item.path)));
-      if (!activeGroup || current[activeGroup.id]) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [activeGroup.id]: true,
-      };
-    });
-  }, [location.pathname]);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const toggleGroup = (groupId) => {
-    setOpenGroups((current) => ({
-      ...current,
-      [groupId]: !current[groupId],
-    }));
-  };
-
   return (
-    <div className={`dashboard ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <div
-        className="sidebar-backdrop"
-        onClick={() => setSidebarOpen(false)}
-        aria-hidden={!sidebarOpen}
+    <div className="dashboard restaurant-workspace admin-shell">
+      <WorkspaceHeader
+        className="admin-topbar"
+        section="Administration"
+        groups={navigationGroups}
+        pathname={location.pathname.replace(/\/$/, '')}
+        navigationLabel="Menu principal de l'administration"
+        userName={user?.name}
+        onPasswordChange={() => setShowPasswordModal(true)}
+        onLogout={handleLogout}
       />
 
-      {/* Sidebar */}
-      <aside className="dashboard-sidebar">
-        <div className="sidebar-brand-row">
-          <div className="sidebar-brand">
-            <h2>Razafimamonjy Restaurant</h2>
-            <span>Administration</span>
-          </div>
-          <button
-            className="sidebar-close"
-            type="button"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Fermer le menu"
-          >
-            ×
-          </button>
-        </div>
-
-        <nav className="sidebar-nav">
-          <ul>
-            <li>
-              <NavLink
-                to="/admin"
-                end
-                className={({ isActive }) => (isActive ? 'active' : '')}
-              >
-                <span className="menu-icon" aria-hidden="true">📊</span>
-                <span className="menu-text">
-                  <span>Tableau de bord</span>
-                  <small className="menu-subtext">Vue générale</small>
-                </span>
-              </NavLink>
-            </li>
-
-            {sidebarGroups.map((group) => {
-              const isOpen = Boolean(openGroups[group.id]);
-              const isActive = group.items.some((item) => matchesPath(location.pathname, item.path));
-
-              return (
-                <li key={group.id} className={`sidebar-group ${isOpen ? 'is-open' : ''} ${isActive ? 'is-active' : ''}`}>
-                  <button
-                    type="button"
-                    className={`sidebar-group-toggle ${isActive ? 'active' : ''}`}
-                    onClick={() => toggleGroup(group.id)}
-                    aria-expanded={isOpen}
-                  >
-                    <span className="menu-icon" aria-hidden="true">{group.icon}</span>
-                    <span className="menu-text">
-                      <span>{group.label}</span>
-                      <small className="menu-subtext">{group.subLabel}</small>
-                    </span>
-                    <span className="sidebar-group-arrow" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
-                  </button>
-
-                  {isOpen ? (
-                    <ul className="sidebar-submenu">
-                      {group.items.map((item) => (
-                        <li key={item.id}>
-                          <NavLink
-                            to={item.path}
-                            className={({ isActive: linkActive }) => (linkActive ? 'active' : '')}
-                          >
-                            <span className="sidebar-submenu-icon" aria-hidden="true">{item.icon || '•'}</span>
-                            <span>{item.label}</span>
-                          </NavLink>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        <div className="sidebar-user">
-          <div className="sidebar-user-name">{user?.name || 'Utilisateur'}</div>
-          <div className="sidebar-user-role">{user?.role || 'Rôle inconnu'}</div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="dashboard-main">
-        <div className="dashboard-header">
-          <div className="header-left">
-            <button
-              className="sidebar-toggle"
-              type="button"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              aria-label="Ouvrir le menu"
-            >
-              ☰
-            </button>
-            <h1>Panneau d'administration</h1>
-          </div>
-          <div className="user-info">
-            <span>Connecté en tant que: {user?.name} ({user?.role})</span>
-            <button className="btn btn-secondary" onClick={() => setShowPasswordModal(true)}>
-              Changer mot de passe
-            </button>
-            <button className="logout-btn" onClick={handleLogout}>
-              Déconnexion
-            </button>
-          </div>
-        </div>
-
+      <main className="dashboard-main admin-content">
         <Routes>
           <Route path="/" element={<AdminDashboard />} />
           <Route path="/users" element={<UserManagement />} />
@@ -266,17 +124,16 @@ const AdminPanel = () => {
           <Route path="/treasury" element={<TreasuryManagement />} />
           <Route path="/cash-movements" element={<CashMovementManagement />} />
         </Routes>
+      </main>
 
-        <ChangePasswordModal
-          isOpen={showPasswordModal}
-          onClose={() => setShowPasswordModal(false)}
-        />
-      </div>
+      <ChangePasswordModal
+        isOpen={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+      />
     </div>
   );
 };
 
-// Composant Dashboard principal
 const AdminDashboard = () => {
   const [stats, setStats] = useState({
     users: 0,
@@ -369,19 +226,15 @@ const AdminDashboard = () => {
   const pricingProposalCount = alerts.priceIncreaseCount + alerts.priceDecreaseCount;
 
   return (
-    <div>
-      <h2>📊 Vue d'ensemble</h2>
+    <div className="admin-dashboard">
+      <h2>Vue d'ensemble</h2>
 
       <div className="card">
-        <h3>⚠️ Suivis prioritaires</h3>
-        <p className="form-hint" style={{ marginBottom: '14px' }}>
-          Cliquer sur une card pour ouvrir directement la page concernée.
-        </p>
+        <h3>Suivis prioritaires</h3>
         <div className="dashboard-alert-grid">
           <Link to="/admin/raw-materials" className="dashboard-alert-card warning">
             <span className="dashboard-alert-label">Matières premières sous seuil</span>
             <strong className="dashboard-alert-number">{alerts.stockAlertCount}</strong>
-            <p>Stocks en alerte à vérifier</p>
           </Link>
 
           <Link to="/admin/suppliers?focus=supplier-payments" className="dashboard-alert-card supplier-warning">
@@ -423,64 +276,58 @@ const AdminDashboard = () => {
           <Link to="/admin/tables" className="dashboard-alert-card neutral">
             <span className="dashboard-alert-label">Tables occupées</span>
             <strong className="dashboard-alert-number">{alerts.occupiedTablesCount}</strong>
-            <p>Tables avec commandes actives</p>
           </Link>
         </div>
       </div>
 
       <div className="card">
-        <h3>🚀 Actions Rapides</h3>
+        <h3>Actions Rapides</h3>
         <div className="quick-actions">
           <Link to="/admin/users" className="btn btn-primary">
-            ➕ Ajouter Utilisateur
+            Ajouter Utilisateur
           </Link>
           <Link to="/admin/tables" className="btn btn-primary">
-            ➕ Ajouter Table
+            Ajouter Table
           </Link>
           <Link to="/admin/menus" className="btn btn-primary">
-            ➕ Créer Menu
+            Créer Menu
           </Link>
           <Link to="/admin/revenue" className="btn btn-primary">
-            📈 Voir Recettes
+            Voir Recettes
           </Link>
           <Link to="/admin/employees" className="btn btn-primary">
-            💼 Gérer la paie
+            Gérer la paie
           </Link>
           <Link to="/admin/treasury" className="btn btn-primary">
-            🏛️ Gérer Trésorerie
+            Gérer Trésorerie
           </Link>
         </div>
       </div>
 
       <div className="stats-grid">
         <div className="stat-card">
-          <h3>👥 Utilisateurs</h3>
+          <h3>Utilisateurs</h3>
           <div className="stat-number">{stats.users}</div>
-          <p>Utilisateurs actifs</p>
         </div>
 
         <div className="stat-card">
-          <h3>🍽️ Tables</h3>
+          <h3>Tables</h3>
           <div className="stat-number">{stats.tables}</div>
-          <p>Tables configurées</p>
         </div>
 
         <div className="stat-card">
-          <h3>🧊 Matières Premières</h3>
+          <h3>Matières Premières</h3>
           <div className="stat-number">{stats.rawMaterials}</div>
-          <p>Stocks bruts</p>
         </div>
 
         <div className="stat-card">
-          <h3>🥄 Ingrédients</h3>
+          <h3>Ingrédients</h3>
           <div className="stat-number">{stats.ingredients}</div>
-          <p>Portions préparées</p>
         </div>
 
         <div className="stat-card">
-          <h3>📋 Menus</h3>
+          <h3>Menus</h3>
           <div className="stat-number">{stats.menus}</div>
-          <p>Plats disponibles</p>
         </div>
       </div>
     </div>

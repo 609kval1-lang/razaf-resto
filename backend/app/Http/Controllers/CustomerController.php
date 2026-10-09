@@ -8,9 +8,6 @@ use Illuminate\Validation\Rule;
 
 class CustomerController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index()
     {
         return response()->json(
@@ -18,17 +15,11 @@ class CustomerController extends Controller
         );
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
     public function create()
     {
         return response()->json(['message' => 'Formulaire de creation client']);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -45,25 +36,16 @@ class CustomerController extends Controller
         ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(Customer $customer)
     {
         return response()->json($customer);
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
     public function edit(Customer $customer)
     {
         return response()->json($customer);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, Customer $customer)
     {
         $validated = $request->validate([
@@ -80,9 +62,6 @@ class CustomerController extends Controller
         ]);
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Customer $customer)
     {
         $customer->delete();

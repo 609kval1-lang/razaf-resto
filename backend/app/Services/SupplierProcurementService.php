@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Models\RawMaterial;
+use App\Models\RawMaterialPriceHistory;
 use App\Models\Supplier;
 use App\Models\SupplierPurchase;
+use App\Support\Ariary;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class SupplierProcurementService
@@ -23,6 +26,7 @@ class SupplierProcurementService
      *   purchased_at?: string|null,
      *   due_date?: string|null,
      *   apply_stock_movement?: bool,
+     *   update_reference_cost?: bool,
      *   actor_user_id?: int|null
      * } $options
      */
@@ -34,20 +38,25 @@ class SupplierProcurementService
         array $options = []
     ): SupplierPurchase {
         $normalizedQuantity = round($quantity, 3);
+        if (abs($quantity - $normalizedQuantity) > 0.000000001) {
+            throw ValidationException::withMessages([
+                'quantity' => ['La quantite d\'achat doit avoir au maximum trois decimales.'],
+            ]);
+        }
         if ($normalizedQuantity <= 0) {
             throw ValidationException::withMessages([
                 'quantity' => ['La quantité doit être supérieure à 0.'],
             ]);
         }
 
-        $normalizedUnitPrice = round($unitPrice, 2);
+        $normalizedUnitPrice = Ariary::requireWhole($unitPrice, 'unit_price');
         if ($normalizedUnitPrice < 0) {
             throw ValidationException::withMessages([
                 'unit_price' => ['Le prix unitaire doit être positif.'],
             ]);
         }
 
-        $totalAmount = round($normalizedQuantity * $normalizedUnitPrice, 2);
+        $totalAmount = Ariary::round($normalizedQuantity * $normalizedUnitPrice);
         if ($totalAmount <= 0) {
             throw ValidationException::withMessages([
                 'unit_price' => ['Le total de l\'achat doit etre superieur a 0.'],
@@ -65,9 +74,14 @@ class SupplierProcurementService
         $initialPaidAmount = $hasExplicitInitialPaidAmount
             ? (float) $options['initial_paid_amount']
             : ($requestedPaymentMode === 'cash' ? $totalAmount : 0.0);
-        $initialPaidAmount = round(max(0, min($initialPaidAmount, $totalAmount)), 2);
+        $initialPaidAmount = Ariary::requireWhole($initialPaidAmount, 'initial_paid_amount');
+        if ($initialPaidAmount < 0 || $initialPaidAmount > $totalAmount) {
+            throw ValidationException::withMessages([
+                'initial_paid_amount' => ['Le paiement initial doit etre compris entre 0 et le total de l\'achat.'],
+            ]);
+        }
 
-        $remainingAmount = round($totalAmount - $initialPaidAmount, 2);
+        $remainingAmount = $totalAmount - $initialPaidAmount;
         $paymentMode = $remainingAmount > 0 ? 'credit' : 'cash';
         $paymentStatus = $this->resolvePurchaseStatus($remainingAmount, $totalAmount);
         $purchasedAt = $options['purchased_at'] ?? now()->toDateTimeString();
@@ -79,9 +93,9 @@ class SupplierProcurementService
             ]);
         }
 
-        $supplier->rawMaterials()->syncWithoutDetaching([(int) $rawMaterial->id]);
         $applyStockMovement = !array_key_exists('apply_stock_movement', $options)
             || (bool) $options['apply_stock_movement'] !== false;
+        $updateReferenceCost = (bool) ($options['update_reference_cost'] ?? false);
 
         /** @var SupplierPurchase $purchase */
         $purchase = DB::transaction(function () use (
@@ -97,8 +111,11 @@ class SupplierProcurementService
             $purchasedAt,
             $dueDate,
             $options,
-            $applyStockMovement
+            $applyStockMovement,
+            $updateReferenceCost
         ) {
+            $supplier->rawMaterials()->syncWithoutDetaching([(int) $rawMaterial->id]);
+
             $purchase = $supplier->purchases()->create([
                 'raw_material_id' => (int) $rawMaterial->id,
                 'quantity' => $normalizedQuantity,
@@ -141,22 +158,46 @@ class SupplierProcurementService
                 );
             }
 
-            if ($applyStockMovement) {
+            if ($applyStockMovement || $updateReferenceCost) {
                 $lockedRawMaterial = RawMaterial::query()
                     ->where('id', (int) $rawMaterial->id)
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                $lockedRawMaterial->stock = round(((float) $lockedRawMaterial->stock) + $normalizedQuantity, 3);
+                if ($applyStockMovement) {
+                    $lockedRawMaterial->stock = round(
+                        ((float) $lockedRawMaterial->stock) + $normalizedQuantity,
+                        RawMaterial::STOCK_DECIMAL_PLACES
+                    );
+                }
+
+                $previousCost = (float) $lockedRawMaterial->cost;
+                if ($updateReferenceCost) {
+                    $lockedRawMaterial->cost = $normalizedUnitPrice;
+                }
                 $lockedRawMaterial->save();
+
+                if ($updateReferenceCost && abs($normalizedUnitPrice - $previousCost) >= 0.01
+                    && Schema::hasTable('raw_material_price_histories')) {
+                    $variationPercent = $previousCost > 0
+                        ? (($normalizedUnitPrice - $previousCost) / $previousCost) * 100
+                        : 100.0;
+                    RawMaterialPriceHistory::query()->create([
+                        'raw_material_id' => (int) $lockedRawMaterial->id,
+                        'changed_by_user_id' => isset($options['actor_user_id']) ? (int) $options['actor_user_id'] : null,
+                        'previous_cost' => round($previousCost, 2),
+                        'new_cost' => round($normalizedUnitPrice, 2),
+                        'variation_amount' => round($normalizedUnitPrice - $previousCost, 2),
+                        'variation_percent' => round($variationPercent, 2),
+                        'changed_at' => now(),
+                    ]);
+                }
+
+                app(InventoryService::class)->syncIngredientsForRawMaterial($lockedRawMaterial->fresh());
             }
 
             return $purchase;
         });
-
-        if ($applyStockMovement) {
-            app(InventoryService::class)->syncIngredientsForRawMaterial($rawMaterial->fresh());
-        }
 
         return $purchase;
     }

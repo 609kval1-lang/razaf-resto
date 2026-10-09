@@ -8,6 +8,7 @@ use App\Models\SupplierPurchase;
 use App\Models\RawMaterial;
 use App\Services\SupplierProcurementService;
 use App\Services\TreasuryService;
+use App\Support\Ariary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -325,6 +326,7 @@ class SupplierController extends Controller
             'note' => ['nullable', 'string', 'max:1000'],
             'purchased_at' => ['nullable', 'date'],
             'due_date' => ['nullable', 'date'],
+            'update_reference_cost' => ['nullable', 'boolean'],
         ]);
 
         $rawMaterial = RawMaterial::query()->findOrFail((int) $validated['raw_material_id']);
@@ -345,6 +347,7 @@ class SupplierController extends Controller
                 'purchased_at' => $validated['purchased_at'] ?? null,
                 'due_date' => $validated['due_date'] ?? null,
                 'actor_user_id' => (int) $request->user()->id,
+                'update_reference_cost' => (bool) ($validated['update_reference_cost'] ?? false),
             ]
         );
 
@@ -378,7 +381,7 @@ class SupplierController extends Controller
         $normalizedMethod = $this->normalizePaymentMethod((string) $validated['method']);
         $cashSourceAccount = $validated['cash_source_account'] ?? null;
 
-        $paymentAmount = round((float) $validated['amount'], 2);
+        $paymentAmount = (float) $validated['amount'];
 
         $updatedPurchase = DB::transaction(function () use ($purchase, $supplier, $request, $validated, $paymentAmount, $normalizedMethod, $cashSourceAccount) {
             /** @var SupplierPurchase $lockedPurchase */
@@ -388,6 +391,10 @@ class SupplierController extends Controller
                 ->firstOrFail();
 
             $remainingBefore = round((float) $lockedPurchase->remaining_amount, 2);
+            // Preserve an exact final settlement of a historical fractional debt.
+            if ($paymentAmount !== $remainingBefore) {
+                Ariary::requireWhole($paymentAmount);
+            }
             if ($remainingBefore <= 0) {
                 throw ValidationException::withMessages([
                     'amount' => ['Cet achat est déjà totalement payé.'],

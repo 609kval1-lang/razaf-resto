@@ -20,7 +20,7 @@ class ReservationDateTimeFormattingTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_admin_and_server_table_lists_keep_local_reservation_time_strings(): void
+    public function test_admin_and_cashier_table_lists_keep_local_reservation_time_strings(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-08 08:00:00'));
 
@@ -43,13 +43,12 @@ class ReservationDateTimeFormattingTest extends TestCase
             ->assertJsonPath('0.reservation_at', '2026-04-08 11:00:00')
             ->assertJsonPath('0.reservation_lock_at', '2026-04-08 09:00:00');
 
-        $server = User::factory()->create(['role' => 'server', 'has_system_access' => true]);
-        Sanctum::actingAs($server);
+        $cashier = User::factory()->create(['role' => 'cashier', 'has_system_access' => true]);
+        Sanctum::actingAs($cashier);
 
-        $this->getJson('/api/server/tables')
+        $this->getJson('/api/cashier/order-entry/tables')
             ->assertOk()
             ->assertJsonPath('0.reservation_at', '2026-04-08 11:00:00')
-            ->assertJsonPath('0.reservation_lock_at', '2026-04-08 09:00:00')
             ->assertJsonPath('0.reservation_locked', false);
     }
 }

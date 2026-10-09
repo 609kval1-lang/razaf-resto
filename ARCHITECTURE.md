@@ -1,4 +1,8 @@
 # 🏪 RAZAF RESTO - Architecture Complète
+> Flux actif au 8 octobre 2026 : caisse unique, sans serveur, cuisine ni bar.
+> Voir [FLUX_CAISSE.md](FLUX_CAISSE.md) pour les regles actuelles.
+> Les descriptions du parcours precedent ci-dessous restent historiques.
+> Sur une base existante, ne pas relancer les seeders ou les anciennes migrations de nettoyage.
 
 ## 📊 Structure Base de Données
 
@@ -222,7 +226,10 @@
 | `payments` | Paiements | id, order_id, amount, method, status |
 | `action_logs` | Audit complet | id, user_id, action, entity_type, changes |
 
-## 🚀 Setup Initial
+## 🚀 Setup Initial (base neuve uniquement)
+
+Sur une base existante, sauvegarder les donnees et verifier les migrations
+en attente avec `php artisan migrate:status` avant toute operation.
 
 ### Backend (Laravel)
 ```bash

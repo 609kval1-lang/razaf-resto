@@ -1,0 +1,231 @@
+.restaurant-workspace.dashboard,
+.restaurant-workspace.staff-layout,
+.restaurant-workspace.login-container {
+  --bg-main: #f5f5ed;
+  --bg-card: #fffdf8;
+  --text-main: #233c33;
+  --text-soft: #65756c;
+  --line: #dfe6dc;
+  --primary: #256249;
+  --primary-dark: #184a37;
+  --sidebar-1: #233c33;
+  --sidebar-2: #183529;
+  --danger: #943f3f;
+  --danger-dark: #793131;
+  --shadow-soft: 0 6px 20px #233c3307;
+  --shadow-strong: 0 18px 40px #233c331a;
+  background: radial-gradient(ellipse at top right, #eaf3e6, transparent 55%), var(--bg-main);
+  color: var(--text-main);
+  font-family: 'Manrope', sans-serif;
+}
+
+.restaurant-workspace .dashboard-sidebar,
+.restaurant-workspace.staff-layout .staff-sidebar {
+  background: linear-gradient(165deg, var(--sidebar-1), var(--sidebar-2));
+  border-right-color: #496354;
+}
+.restaurant-workspace .sidebar-brand span,
+.restaurant-workspace .staff-brand span,
+.restaurant-workspace .sidebar-user-role,
+.restaurant-workspace .staff-user-card small { color: #bdd0bf; }
+.restaurant-workspace .dashboard-sidebar li a,
+.restaurant-workspace .sidebar-group-toggle,
+.restaurant-workspace .staff-nav-link,
+.restaurant-workspace .staff-nav-group-toggle { color: #d7e2d6; gap: 6px; border-radius: 9px; }
+.restaurant-workspace .dashboard-sidebar li a.active,
+.restaurant-workspace .staff-nav-link.active {
+  color: #fffdf8;
+  background: #45694e;
+  border-color: #789779;
+  box-shadow: inset 3px 0 0 #c4d6ab;
+  transform: none;
+}
+.restaurant-workspace .sidebar-group-toggle.active,
+.restaurant-workspace .sidebar-group.is-open > .sidebar-group-toggle,
+.restaurant-workspace .staff-nav-group-toggle.active {
+  background: #ffffff0e;
+  border-color: #78977970;
+  color: #fffdf8;
+}
+.restaurant-workspace .sidebar-group-arrow,
+.restaurant-workspace .staff-nav-group-arrow { font-size: 0.62rem; color: #bdd0bf; }
+.restaurant-workspace .sidebar-submenu,
+.restaurant-workspace .staff-sidebar-submenu { border-left-color: #78977970; }
+
+.restaurant-workspace .dashboard-header,
+.restaurant-workspace .staff-header {
+  background: #fffdf8eb;
+  border-color: var(--line);
+  box-shadow: none;
+  border-radius: 12px;
+}
+.restaurant-workspace .dashboard-header h1,
+.restaurant-workspace .staff-header h1 { color: var(--text-main); font-size: 0.95rem; }
+.restaurant-workspace .user-info { font-size: 0.75rem; }
+.restaurant-workspace .card,
+.restaurant-workspace .staff-card {
+  color: var(--text-main);
+  background: radial-gradient(ellipse at top right, #edf4e9, transparent 65%), var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-soft);
+  padding: 20px;
+  min-width: 0;
+}
+.restaurant-workspace .dashboard-main > div > h2,
+.restaurant-workspace .card h2,
+.restaurant-workspace .staff-card-header h2 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(1.4rem, 2.2vw, 1.9rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  color: var(--text-main);
+}
+.restaurant-workspace .card h3,
+.restaurant-workspace .staff-card h3 { color: var(--text-main); font-size: 0.92rem; }
+.restaurant-workspace .staff-module-stack { gap: 16px; }
+.restaurant-workspace .stats-grid,
+.restaurant-workspace .staff-stat-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; }
+.restaurant-workspace .stat-card,
+.restaurant-workspace .staff-stat-card,
+.restaurant-workspace .stock-summary-card {
+  background: #fffefa;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: none;
+  padding: 14px;
+  min-width: 0;
+}
+.restaurant-workspace .stat-card h3,
+.restaurant-workspace .staff-stat-card span { font: 700 0.75rem 'Manrope', sans-serif; color: var(--text-soft); }
+.restaurant-workspace .stat-number,
+.restaurant-workspace .staff-stat-card strong {
+  color: var(--primary);
+  font-size: clamp(1.2rem, 1.7vw, 1.65rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.restaurant-workspace .stat-card p,
+.restaurant-workspace .staff-muted,
+.restaurant-workspace .form-hint { color: var(--text-soft); font-size: 0.73rem; }
+.restaurant-workspace .dashboard-alert-card { box-shadow: none; border-radius: 10px; }
+.restaurant-workspace .dashboard-alert-card.neutral,
+.restaurant-workspace .dashboard-alert-card.cool { background: #edf4ed; border-color: #cfdeca; }
+.restaurant-workspace .dashboard-alert-card.cool .dashboard-alert-number { color: var(--primary); }
+.restaurant-workspace .dashboard-alert-label { font-size: 0.68rem; color: var(--text-main); }
+
+.restaurant-workspace .btn,
+.restaurant-workspace .staff-btn,
+.restaurant-workspace .logout-btn,
+.restaurant-workspace .staff-logout-btn {
+  font-family: inherit;
+  font-size: 0.75rem;
+  border-radius: 9px;
+  box-shadow: none;
+  min-height: 40px;
+  padding: 10px 14px;
+}
+.restaurant-workspace .btn-primary,
+.restaurant-workspace .staff-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.restaurant-workspace .btn-primary:hover:not(:disabled),
+.restaurant-workspace .staff-btn.primary:hover:not(:disabled) { background: var(--primary-dark); transform: none; }
+.restaurant-workspace .btn-secondary,
+.restaurant-workspace .staff-btn.secondary,
+.restaurant-workspace .sidebar-toggle,
+.restaurant-workspace .staff-menu-btn { background: #fffefa; color: var(--text-main); border: 1px solid #cbd7c9; }
+.restaurant-workspace .btn-danger,
+.restaurant-workspace .staff-btn.danger,
+.restaurant-workspace .logout-btn,
+.restaurant-workspace .staff-logout-btn { background: var(--danger); color: #fff; }
+.restaurant-workspace .btn:disabled,
+.restaurant-workspace .staff-btn:disabled { cursor: not-allowed; opacity: 0.52; }
+.restaurant-workspace :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #73a48a; outline-offset: 3px; }
+.restaurant-workspace :is(.form-group, .staff-field, .staff-payment-form-grid, .datatable-toolbar, .revenue-dashboard-filters, .co-deposit-form, .co-new-addition, .co-group-card, .co-list-filters) :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+.restaurant-workspace .staff-date-input {
+  background: #fffefa;
+  color: var(--text-main);
+  border: 1px solid #cfdacf;
+  border-radius: 9px;
+  font-family: inherit;
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.restaurant-workspace .co-deposit-form label { font-size: 0.78rem; color: var(--text-soft); }
+.restaurant-workspace :is(input[type='date'], input[type='datetime-local']) { color-scheme: light; line-height: 1.5; }
+.restaurant-workspace :is(input[type='date'], input[type='datetime-local'])::-webkit-datetime-edit { padding: 0; }
+.restaurant-workspace .reservation-datetime-grid { padding: 12px; background: #edf4ed; border: 1px solid var(--line); border-radius: 12px; grid-template-columns: minmax(0, 1fr) 72px auto 72px; }
+.restaurant-workspace .reservation-list-card { display: grid; gap: 6px; font-size: 0.78rem; }
+.restaurant-workspace .reservation-list-card strong { color: var(--text-main); }
+.restaurant-workspace .reservation-list-card time { color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.restaurant-workspace .reservation-list-card small { color: #8b692c; font-size: 0.69rem; }
+@media (max-width: 420px) {
+  .restaurant-workspace .reservation-datetime-grid { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .restaurant-workspace .reservation-datetime-grid > input { grid-column: 1 / -1; }
+}
+.restaurant-workspace input:disabled,
+.restaurant-workspace select:disabled { background: #f0f1e9; color: #7a8176; }
+.restaurant-workspace :is(input, select, textarea):focus { border-color: var(--primary); box-shadow: 0 0 0 2px #73a48a25; }
+.restaurant-workspace .staff-payment-card { background: #fffefa; border-color: var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+.restaurant-workspace .staff-voucher-table-panel { background: #edf4ed; border-color: #cfdeca; }
+.restaurant-workspace .staff-payment-card header { gap: 12px; }
+.restaurant-workspace .staff-payment-form-grid { gap: 12px; }
+.restaurant-workspace .staff-field-hint { font-size: 0.7rem; color: var(--text-soft); }
+.restaurant-workspace .staff-list-item,
+.restaurant-workspace .staff-cart-item { background: #fffefa; border-color: var(--line); }
+.restaurant-workspace .table-container,
+.restaurant-workspace .staff-table-wrap { border-color: var(--line); border-radius: 10px; }
+.restaurant-workspace :is(.data-table, .staff-table, .table) { font-size: 0.78rem; color: var(--text-main); }
+.restaurant-workspace :is(.data-table, .staff-table, .table) th { background: #edf4ed; color: var(--text-soft); border-color: var(--line); }
+.restaurant-workspace :is(.data-table, .staff-table, .table) td { border-color: var(--line); }
+.restaurant-workspace .datatable-count,
+.restaurant-workspace .datatable-page-size,
+.restaurant-workspace .datatable-sort-indicator { color: var(--text-soft); }
+.restaurant-workspace .datatable-sort-indicator.is-active { color: var(--primary); }
+.restaurant-workspace .datatable-pagination { font-size: 0.73rem; }
+.restaurant-workspace .modal { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-strong); }
+.restaurant-workspace .modal-header { border-color: var(--line); }
+.restaurant-workspace .modal-header h3 { font-family: Georgia, 'Times New Roman', serif; font-size: 1.4rem; font-weight: 500; }
+.restaurant-workspace .revenue-ranking-toolbar { background: #edf4ed; border-color: var(--line); border-radius: 12px; }
+.restaurant-workspace.login-container { background: radial-gradient(ellipse at top right, #dbe9ce, transparent 65%), var(--bg-main); }
+.restaurant-workspace .login-card { background: var(--bg-card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow-strong); }
+.restaurant-workspace .login-header h1 { color: var(--text-main); font-family: Georgia, 'Times New Roman', serif; font-weight: 500; font-size: 1.8rem; }
+.restaurant-workspace .login-header h2 { color: var(--text-soft); font-size: 0.85rem; font-weight: 600; margin-bottom: 26px; }
+.restaurant-workspace .login-btn { background: var(--primary); font: 700 0.85rem 'Manrope', sans-serif; }
+.restaurant-workspace .login-btn:hover:not(:disabled) { background: var(--primary-dark); transform: none; box-shadow: none; }
+.restaurant-workspace .login-footer { border-color: var(--line); }
+.restaurant-workspace .role-info span { background: #edf4ed; color: var(--primary); border-radius: 7px; }
+.restaurant-workspace .status-badge { border: 1px solid #d8e6d1; background: #edf4e9; color: #41694c; font-size: 0.69rem; border-radius: 6px; }
+.restaurant-workspace .status-occupied { border-color: #d3e1e9; background: #eaf1f5; color: #365c77; }
+.restaurant-workspace .status-reserved { border-color: #eadeba; background: #fff4d9; color: #7c551b; }
+.restaurant-workspace .staff-payment-card header > div > span { color: var(--text-soft); }
+
+@media (max-width: 720px) {
+  .restaurant-workspace .dashboard-main,
+  .restaurant-workspace .staff-main { padding: 12px; }
+  .restaurant-workspace .card,
+  .restaurant-workspace .staff-card { padding: 16px; }
+  .restaurant-workspace .stats-grid,
+  .restaurant-workspace .staff-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .restaurant-workspace .stat-card,
+  .restaurant-workspace .staff-stat-card { padding: 12px; }
+  .restaurant-workspace .staff-header-actions { display: flex; }
+  .restaurant-workspace .staff-header-actions > button { width: auto; flex: 1; font-size: 0.68rem; padding: 8px 10px; }
+  .restaurant-workspace .user-info { gap: 8px; }
+  .restaurant-workspace .staff-payment-card { padding: 12px; }
+}
+@media (max-width: 359px) {
+  .restaurant-workspace .stats-grid,
+  .restaurant-workspace .staff-stat-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.restaurant-workspace .staff-cash-change { display: grid; gap: 8px; align-content: center; }
+.restaurant-workspace .staff-cash-change output { font-size: 1.25rem; font-weight: 800; color: var(--text-main); }
+.restaurant-workspace .staff-cash-change small { color: #974132; }
+.restaurant-workspace .staff-cash-receipt { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.restaurant-workspace .staff-cash-receipt button { margin-left: auto; }

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import { normalizePaymentMethod } from '../../utils/paymentMethods';
+import { isWholeAriary } from '../../utils/ariary';
 import { useDialog } from '../common/DialogProvider';
 import DataTable from '../common/DataTable';
 
@@ -376,7 +377,7 @@ const SupplierManagement = () => {
         ...(previous[normalizedPurchaseId] || {}),
         amount: amount === '' || amount === null || amount === undefined
           ? (previous[normalizedPurchaseId]?.amount ?? '')
-          : String(amount),
+          : (isWholeAriary(amount) ? String(amount) : ''),
       },
     }));
   };
@@ -416,7 +417,7 @@ const SupplierManagement = () => {
             title="Ouvrir le suivi paiement du fournisseur"
             aria-label={`Ouvrir le suivi paiement de ${supplier.name}`}
           >
-            📒 Suivi
+            Suivi
           </button>
         </div>
       ),
@@ -508,8 +509,8 @@ const SupplierManagement = () => {
       searchable: false,
       render: (supplier) => (
         <div className="actions">
-          <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(supplier)}>✏️</button>
-          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(supplier.id)}>🗑️</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(supplier)}>Modifier</button>
+          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(supplier.id)}>Supprimer</button>
         </div>
       ),
     },
@@ -618,7 +619,7 @@ const SupplierManagement = () => {
             <input
               className="admin-input admin-input-sm"
               type="number"
-              step="0.01"
+              step="1"
               min="0"
               placeholder="Montant"
               value={form.amount}
@@ -950,6 +951,11 @@ const SupplierManagement = () => {
       ? remainingAmount
       : Number(rawAmount);
 
+    if (rawAmount !== '' && rawAmount !== undefined && rawAmount !== null && !isWholeAriary(rawAmount)) {
+      setMessage('Erreur: saisissez un montant entier en Ariary, sans decimales.');
+      return;
+    }
+
     if (!Number.isFinite(amount) || amount <= 0) {
       setMessage('Erreur: montant de paiement invalide');
       return;
@@ -1000,8 +1006,8 @@ const SupplierManagement = () => {
     <div>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
-          <h2>🚚 Fournisseurs et Restes à Payer</h2>
-          <button className="btn btn-primary" onClick={openCreateModal}>➕ Ajouter Fournisseur</button>
+          <h2>Fournisseurs et Restes à Payer</h2>
+          <button className="btn btn-primary" onClick={openCreateModal}>Ajouter Fournisseur</button>
         </div>
 
         {message ? (
@@ -1060,7 +1066,6 @@ const SupplierManagement = () => {
                         </p>
                       ) : null}
                       <p>Echeance la plus proche: {formatDate(alert.next_due_date)} · Dernier achat: {formatDate(alert.latest_purchased_at, true)}</p>
-                      <p className="supplier-payment-alert-hint">Cliquer pour ouvrir le suivi, choisir un achat a regler ou payer ce fournisseur en une fois.</p>
                     </div>
                     <span className={`stock-status ${alert.is_overdue ? 'low' : 'warning'}`}>
                       {alert.is_overdue ? `${alert.overdue_purchases_count} en retard` : 'A regler'}
@@ -1111,23 +1116,20 @@ const SupplierManagement = () => {
           <>
             {focusedPurchaseId ? (
               <p className="form-hint" style={{ marginBottom: '10px' }}>
-                Achat ciblé: #{focusedPurchaseId}. Le montant restant a été prérempli pour faciliter le paiement.
+                Achat #{focusedPurchaseId}
               </p>
             ) : null}
             <div className="stats-grid" style={{ marginBottom: '12px' }}>
-              <div className="stat-card"><h3>Fournisseur</h3><div className="stat-number" style={{ fontSize: '1rem' }}>{selectedSupplier?.name || '-'}</div><p>Selection active</p></div>
+              <div className="stat-card"><h3>Fournisseur</h3><div className="stat-number" style={{ fontSize: '1rem' }}>{selectedSupplier?.name || '-'}</div></div>
               <div className="stat-card"><h3>Total achats</h3><div className="stat-number">{formatCurrency(ledger?.summary?.total_purchased)}</div><p>{ledger?.summary?.purchases_count || 0} achat(s)</p></div>
-              <div className="stat-card"><h3>Total paye</h3><div className="stat-number">{formatCurrency(ledger?.summary?.total_paid)}</div><p>Paiements cumules</p></div>
+              <div className="stat-card"><h3>Total paye</h3><div className="stat-number">{formatCurrency(ledger?.summary?.total_paid)}</div></div>
               <div className="stat-card"><h3>Reste a payer</h3><div className="stat-number">{formatCurrency(ledger?.summary?.total_remaining)}</div><p>{ledger?.summary?.overdue_purchases_count || 0} en retard</p></div>
             </div>
 
             <div className="card" style={{ margin: 0, marginBottom: '12px', padding: '12px' }}>
               <h3 style={{ marginBottom: '8px' }}>Achat matière première</h3>
-              <p className="form-hint" style={{ marginBottom: '10px' }}>
-                Cette section Fournisseurs sert uniquement au suivi et au règlement des dettes. Pour enregistrer un nouvel achat matière première, utilisez la section Matières premières.
-              </p>
-              <Link to="/admin/raw-materials" className="btn btn-primary">
-                Aller à Matières premières
+              <Link to={`/admin/raw-materials?action=purchase&supplier_id=${activeSupplierId}`} className="btn btn-primary">
+                Enregistrer un achat
               </Link>
             </div>
 
@@ -1135,9 +1137,6 @@ const SupplierManagement = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
                 <div>
                   <h3 style={{ marginBottom: '6px' }}>Action paiement fournisseur</h3>
-                  <p className="form-hint">
-                    Choisissez d&apos;abord l&apos;action: dette détaillée ou règlement global. Une seule interface s&apos;affiche à la fois.
-                  </p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
@@ -1156,11 +1155,6 @@ const SupplierManagement = () => {
                   </button>
                 </div>
               </div>
-              <div className="form-hint">
-                {activeSupplierPaymentAction === 'outstanding_debts'
-                  ? 'Mode dettes: vous reglez achat par achat pour garder le detail de chaque ingredient.'
-                  : 'Mode global: vous reglez d\'un coup tous les ingredients impayes du fournisseur selectionne.'}
-              </div>
             </div>
 
             {activeSupplierPaymentAction === 'global_settlement' ? (
@@ -1168,9 +1162,6 @@ const SupplierManagement = () => {
                 <div className="supplier-bulk-settlement-header">
                   <div>
                     <h3 style={{ marginBottom: '6px' }}>Reglement global du fournisseur</h3>
-                    <p className="form-hint">
-                      Cette action regle uniquement les dettes du fournisseur selectionne (tous les ingredients impayes de ce fournisseur).
-                    </p>
                   </div>
                   <div className={`supplier-bulk-settlement-amount ${totalOutstandingForSupplier <= 0 ? 'is-empty' : ''}`}>
                     {formatCurrency(totalOutstandingForSupplier)}
@@ -1253,9 +1244,6 @@ const SupplierManagement = () => {
 
             <div className="card" style={{ margin: 0, padding: '12px' }}>
               <h3 style={{ marginBottom: '8px' }}>Historique des achats regles</h3>
-              <p className="form-hint" style={{ marginBottom: '10px' }}>
-                Cette section affiche uniquement l&apos;historique deja regle, separe des dettes en cours.
-              </p>
               <DataTable
                 columns={historyPurchaseColumns}
                 data={settledPurchases}

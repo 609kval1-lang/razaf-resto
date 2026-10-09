@@ -10,7 +10,12 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Http\Controllers\Controller;
 use App\Services\TreasuryService;
+use App\Services\OrderStockService;
+use App\Services\OrderTableService;
+use App\Services\ReservationDepositService;
+use App\Services\SalesBreakdownService;
 use App\Support\Ariary;
+use App\Support\CashierDay;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -21,11 +26,14 @@ class CashierController extends Controller
 {
     private const CUSTOMER_CACHE_KEY = 'server:snapshot:customers:v1';
 
-    // Voir commandes dont l'addition a été demandée et qui sont en attente d'encaissement
     public function getReadyOrders(Request $request)
     {
+        $request->validate(['order_id' => 'nullable|integer|min:1', 'scope' => 'nullable|in:vouchers,unassigned']);
         $includeItems = $request->boolean('include_items', false);
         $selectColumns = ['id', 'table_id', 'customer_id', 'total_amount', 'status', 'created_at', 'served_at', 'occupies_table'];
+        if ($this->hasOrderColumn('order_label')) {
+            $selectColumns = [...$selectColumns, 'order_label', 'linked_table_ids'];
+        }
         if ($this->hasOrderColumn('order_type')) {
             $selectColumns[] = 'order_type';
         }
@@ -61,19 +69,10 @@ class CashierController extends Controller
                 },
             ]);
 
-        $query->where('status', '!=', 'paid');
-        $query->where(function ($workflowQuery) {
-            if ($this->hasOrderColumn('bill_requested_at')) {
-                $workflowQuery->whereNotNull('bill_requested_at');
-            } else {
-                $workflowQuery->where('status', 'served');
-            }
-
-            $workflowQuery->orWhereHas('payments', function ($paymentQuery) {
-                $paymentQuery->where('status', 'pending');
-            });
-        });
-
+        $query->whereNotIn('status', ['paid', 'archived']);
+        if ($request->filled('order_id')) $query->whereKey($request->integer('order_id'));
+        if ($request->input('scope') === 'vouchers') $query->whereHas('payments', fn ($payments) => $payments->where('status', 'pending')->where('method', 'bon'));
+        if ($request->input('scope') === 'unassigned') $query->whereIn('order_type', ['takeaway', 'other']);
         if ($this->hasOrderColumn('bill_requested_at')) {
             $query
                 ->orderByRaw('CASE WHEN bill_requested_at IS NULL THEN 1 ELSE 0 END ASC')
@@ -87,26 +86,10 @@ class CashierController extends Controller
         foreach ($orders as $order) {
             $this->synchronizeOrderWorkflowStatus($order, false);
         }
-        $orders = $orders
-            ->filter(function (Order $order) {
-                $latestPayment = $order->latestPayment;
-                $hasPendingPayment = $latestPayment && (string) $latestPayment->status === 'pending';
-
-                if ($hasPendingPayment) {
-                    return true;
-                }
-
-                if ($this->hasOrderColumn('bill_requested_at')) {
-                    return !empty($order->bill_requested_at) && in_array((string) $order->status, ['served'], true);
-                }
-
-                return in_array((string) $order->status, ['served'], true);
-            })
-            ->values();
-
         if ($includeItems) {
             $orders->load([
-                'items:id,order_id,menu_id,quantity,price_at_order,status',
+                'items:'.implode(',', ['id', 'order_id', 'menu_id', 'quantity', 'price_at_order', 'status',
+                    ...(Schema::hasColumn('order_items', 'source_table_id') ? ['source_table_id'] : [])]),
                 'items.menu:id,name',
             ]);
             $orders->each(function (Order $order) {
@@ -125,7 +108,6 @@ class CashierController extends Controller
         return response()->json($orders);
     }
 
-    // Préparer l'addition avant encaissement réel
     public function preparePayment(Request $request, Order $order)
     {
         $validated = $request->validate([
@@ -134,6 +116,7 @@ class CashierController extends Controller
             'discount_percent' => 'nullable|integer|min:0|max:10',
             'customer_id' => 'nullable|exists:customers,id',
             'customer_name' => 'nullable|string|max:120',
+            'deposit_ids' => 'nullable|array|max:20', 'deposit_ids.*' => 'integer|distinct|min:1',
         ]);
 
         $normalizedMethod = $this->normalizePaymentMethod((string) $validated['method']);
@@ -158,7 +141,7 @@ class CashierController extends Controller
                     throw new InvalidArgumentException('Commande déjà encaissée.');
                 }
 
-                $this->assertBillRequestExists($lockedOrder);
+                $this->assertOrderCanBePaid($lockedOrder);
 
                 /** @var Payment|null $payment */
                 $payment = $lockedOrder->payments()
@@ -208,6 +191,12 @@ class CashierController extends Controller
                     $payment->save();
                 } else {
                     $payment = $lockedOrder->payments()->create($payload);
+                }
+
+                if (!$hasCompletedPayments) {
+                    $ids = $validated['deposit_ids'] ?? (Schema::hasTable('reservation_deposit_applications')
+                        ? \App\Models\ReservationDepositApplication::where('payment_id', $payment->id)->pluck('deposit_id')->all() : []);
+                    app(ReservationDepositService::class)->reserve($payment, $ids);
                 }
 
                 if ($lockedOrder->isDirty()) {
@@ -275,7 +264,8 @@ class CashierController extends Controller
             'amount_before_discount' => $grossAmount,
             'discount_percent' => $discountPercent,
             'discount_amount' => $discountAmount,
-            'amount_due' => $finalAmount,
+            'amount_due' => max(0, $finalAmount - (int) $payment->deposit_amount),
+            'deposit_amount' => (int) $payment->deposit_amount,
         ]);
     }
 
@@ -369,7 +359,6 @@ class CashierController extends Controller
         ]);
     }
 
-    // Traiter paiement réel après impression
     public function processPayment(Request $request, Order $order)
     {
         $validated = $request->validate([
@@ -379,8 +368,9 @@ class CashierController extends Controller
             'customer_id' => 'nullable|exists:customers,id',
             'customer_name' => 'nullable|string|max:120',
             'split_with_voucher' => 'nullable|boolean',
-            'split_immediate_amount' => 'nullable|numeric|min:0.01',
+            'split_immediate_amount' => 'nullable|numeric|min:1|decimal:0',
             'split_immediate_method' => 'nullable|in:cash,mobile_money,card,transfer,check',
+            'expected_balance' => 'nullable|numeric|min:0|max:99999999|decimal:0',
         ]);
         $actorId = (int) $request->user()->id;
 
@@ -423,7 +413,7 @@ class CashierController extends Controller
                     );
                 }
 
-                $this->assertBillRequestExists($lockedOrder);
+                $this->assertOrderCanBePaid($lockedOrder);
 
                 $splitWithVoucher = (bool) ($validated['split_with_voucher'] ?? false);
                 $initialMethod = $this->normalizePaymentMethod((string) ($payment->method ?? ''));
@@ -446,6 +436,11 @@ class CashierController extends Controller
                 $discountPercent = (int) ($payment->discount_percent ?? 0);
                 $discountAmount = Ariary::round($payment->discount_amount ?? 0);
                 $finalAmount = Ariary::round($payment->amount ?? 0);
+                $depositAmount = (int) $payment->deposit_amount;
+                $collectionAmount = max(0, $finalAmount - $depositAmount);
+                if (isset($validated['expected_balance']) && (float) $validated['expected_balance'] !== $collectionAmount) {
+                    throw new InvalidArgumentException('Le montant de cette addition a change. Actualisez avant encaissement.');
+                }
 
                 if ($splitWithVoucher) {
                     if ($initialMethod === 'bon') {
@@ -479,23 +474,25 @@ class CashierController extends Controller
                         throw new InvalidArgumentException('Le montant du premier paiement doit être supérieur à 0.');
                     }
 
-                    if ($immediateAmount >= $finalAmount) {
+                    if ($immediateAmount >= $collectionAmount) {
                         throw new InvalidArgumentException(
                             'Le premier paiement doit être inférieur au total pour laisser un reliquat en bon client.'
                         );
                     }
 
-                    $voucherAmount = Ariary::round($finalAmount - $immediateAmount);
+                    $voucherAmount = Ariary::round($collectionAmount - $immediateAmount);
                     if ($voucherAmount <= 0) {
                         throw new InvalidArgumentException('Le reliquat en bon client doit être supérieur à 0.');
                     }
 
                     $completedDiscountAmount = $finalAmount > 0
-                        ? Ariary::round(($discountAmount * $immediateAmount) / $finalAmount)
+                        ? Ariary::round(($discountAmount * ($immediateAmount + $depositAmount)) / $finalAmount)
                         : 0.0;
                     $voucherDiscountAmount = Ariary::round(max(0, $discountAmount - $completedDiscountAmount));
 
-                    $payment->amount = $immediateAmount;
+                    app(OrderStockService::class)->consume($lockedOrder, $actorId);
+                    app(ReservationDepositService::class)->apply($payment, $actorId);
+                    $payment->amount = $immediateAmount + $depositAmount;
                     $payment->discount_percent = $discountPercent;
                     $payment->discount_amount = $completedDiscountAmount;
                     $payment->method = $immediateMethod;
@@ -582,6 +579,8 @@ class CashierController extends Controller
                     throw new InvalidArgumentException('Sélectionnez un vrai mode d’encaissement pour finaliser ce paiement.');
                 }
 
+                app(OrderStockService::class)->consume($lockedOrder, $actorId);
+                app(ReservationDepositService::class)->apply($payment, $actorId);
                 $payment->status = 'completed';
                 $payment->settlement_method = $actualMethod;
                 $payment->reference = $validated['reference'] ?? $payment->reference;
@@ -593,7 +592,7 @@ class CashierController extends Controller
                     payment: $payment,
                     actorId: $actorId,
                     actualMethod: $actualMethod,
-                    amount: $finalAmount,
+                    amount: $collectionAmount,
                     discountPercent: $discountPercent,
                     discountAmount: $discountAmount
                 );
@@ -617,7 +616,7 @@ class CashierController extends Controller
                     $grossAmount,
                     $discountPercent,
                     $discountAmount,
-                    $finalAmount,
+                    $collectionAmount,
                     $actualMethod,
                     0.0,
                     false,
@@ -638,6 +637,7 @@ class CashierController extends Controller
             'discount_percent' => $discountPercent,
             'discount_amount' => $discountAmount,
             'amount_paid' => $amountPaid,
+            'deposit_applied' => (int) $payment->deposit_amount,
             'settlement_method' => $actualMethod,
             'voucher_amount' => $voucherAmount,
             'split_with_voucher' => $splitWithVoucher,
@@ -647,16 +647,19 @@ class CashierController extends Controller
         ]);
     }
 
-    // Voir statistiques caisse
     public function getDayStats()
     {
-        $today = now()->startOfDay();
-        $salesBreakdown = $this->salesBreakdownSince($today);
+        [$today, $tomorrow] = CashierDay::bounds();
         $completedToday = Payment::query()
-            ->with(['order.table:id,table_number', 'order.customer:id,name'])
+            ->with(['order.table:id,table_number', 'order.customer:id,name', 'order.items.menu:id,name,category'])
             ->where('status', 'completed')
             ->where('encashed_at', '>=', $today)
-            ->get(['id', 'order_id', 'amount', 'method', 'settlement_method', 'reference', 'encashed_at']);
+            ->where('encashed_at', '<', $tomorrow)
+            ->orderByDesc('encashed_at')->orderByDesc('id')
+            ->get($this->paymentSelectColumns());
+        $sales = app(SalesBreakdownService::class)->summarize($completedToday);
+        $totalRevenue = Ariary::round($completedToday->sum('amount'));
+        $collections = $completedToday->filter(fn ($payment) => $payment->collected_amount > 0)->values();
 
         $cashInApprovedTotal = (float) CashMovement::query()
             ->where('status', 'approved')
@@ -676,11 +679,13 @@ class CashierController extends Controller
         $cashInApprovedToday = (float) CashMovement::query()
             ->where('status', 'approved')
             ->where('destination_account', CashMovement::ACCOUNT_CASH)
-            ->where(function ($query) use ($today) {
+            ->where(function ($query) use ($today, $tomorrow) {
                 $query->where('approved_at', '>=', $today)
-                    ->orWhere(function ($fallback) use ($today) {
+                    ->where('approved_at', '<', $tomorrow)
+                    ->orWhere(function ($fallback) use ($today, $tomorrow) {
                         $fallback->whereNull('approved_at')
-                            ->where('created_at', '>=', $today);
+                            ->where('created_at', '>=', $today)
+                            ->where('created_at', '<', $tomorrow);
                     });
             })
             ->sum('amount');
@@ -688,11 +693,13 @@ class CashierController extends Controller
         $cashOutApprovedToday = (float) CashMovement::query()
             ->where('status', 'approved')
             ->where('source_account', CashMovement::ACCOUNT_CASH)
-            ->where(function ($query) use ($today) {
+            ->where(function ($query) use ($today, $tomorrow) {
                 $query->where('approved_at', '>=', $today)
-                    ->orWhere(function ($fallback) use ($today) {
+                    ->where('approved_at', '<', $tomorrow)
+                    ->orWhere(function ($fallback) use ($today, $tomorrow) {
                         $fallback->whereNull('approved_at')
-                            ->where('created_at', '>=', $today);
+                            ->where('created_at', '>=', $today)
+                            ->where('created_at', '<', $tomorrow);
                     });
             })
             ->sum('amount');
@@ -701,14 +708,17 @@ class CashierController extends Controller
             ->where('status', 'pending')
             ->where('source_account', CashMovement::ACCOUNT_CASH)
             ->where('created_at', '>=', $today)
+            ->where('created_at', '<', $tomorrow)
             ->sum('amount');
 
         $stats = [
-            'total_revenue' => Ariary::round($completedToday->sum('amount')),
+            'total_revenue' => $totalRevenue,
+            'customer_count' => $completedToday->pluck('order_id')->unique()->count(),
             'total_orders' => Order::where('status', 'paid')
                 ->where('paid_at', '>=', $today)
+                ->where('paid_at', '<', $tomorrow)
                 ->count(),
-            'by_method' => $completedToday
+            'by_method' => $collections
                 ->groupBy(function (Payment $payment) {
                     return (string) ($payment->settlement_method ?: $payment->method);
                 })
@@ -717,16 +727,17 @@ class CashierController extends Controller
                     return [
                         'method' => $method,
                         'count' => $payments->count(),
-                        'total' => Ariary::round($payments->sum('amount')),
+                        'total' => Ariary::round($payments->sum(fn ($payment) => $payment->collected_amount)),
                         'account' => $account,
                         'account_label' => $account ? (CashMovement::treasuryAccountLabels()[$account] ?? $account) : null,
                     ];
                 })
                 ->sortBy('method')
                 ->values(),
-            'by_account' => $this->groupPaymentsByAccount($completedToday),
-            'recent_customer_payments' => $this->formatRecentCustomerPayments($completedToday->take(12)),
-            'sales_breakdown' => $salesBreakdown,
+            'by_account' => $this->groupPaymentsByAccount($collections),
+            'recent_customer_payments' => $this->formatRecentCustomerPayments($collections->take(12)),
+            'sales_breakdown' => $sales['sales_breakdown'],
+            'dashboard_sales' => $sales['dashboard_sales'],
             'cash_register' => [
                 'cash_in_approved' => round($cashInApprovedToday, 2),
                 'cash_out_approved' => round($cashOutApprovedToday, 2),
@@ -741,7 +752,6 @@ class CashierController extends Controller
         return response()->json($stats);
     }
 
-    // Générer facture
     public function generateInvoice(Order $order)
     {
         $payments = $order->payments()->orderBy('id')->get();
@@ -781,6 +791,9 @@ class CashierController extends Controller
             'order_id' => $order->id,
             'table' => $order->table ? $order->table->table_number : null,
             'order_type' => (string) ($order->order_type ?? 'dine_in'),
+            'order_label' => $order->order_label,
+            'deposit_amount' => (int) $payments->sum('deposit_amount'),
+            'amount_to_collect' => max(0, $pendingAmount - (int) $payments->where('status', 'pending')->sum('deposit_amount')),
             'with_packaging' => (bool) ($order->with_packaging ?? false),
             'packaging_quantity' => $packagingQuantity,
             'packaging_unit_price' => $packagingUnitPrice,
@@ -812,7 +825,6 @@ class CashierController extends Controller
         return response()->json($invoice);
     }
 
-    // Voir opérations paiements du jour (caisse)
     public function getPaymentHistory(Request $request)
     {
         $request->validate([
@@ -821,14 +833,13 @@ class CashierController extends Controller
             'to' => 'nullable|date|after_or_equal:from',
         ]);
 
-        $todayStart = now()->startOfDay();
-        $todayEnd = now()->endOfDay();
+        [$todayStart, $tomorrowStart] = CashierDay::bounds();
 
         $query = Payment::with(['order.table', 'order.customer'])
             ->whereIn('status', ['pending', 'completed']);
         $dateExpression = DB::raw('COALESCE(encashed_at, printed_at, created_at)');
 
-        $query->whereBetween($dateExpression, [$todayStart, $todayEnd]);
+        $query->where($dateExpression, '>=', $todayStart)->where($dateExpression, '<', $tomorrowStart);
 
         $payments = $query->orderByRaw('COALESCE(encashed_at, printed_at, created_at) DESC')->paginate(50);
         $payments->getCollection()->transform(function (Payment $payment) {
@@ -849,7 +860,7 @@ class CashierController extends Controller
                     'account' => $account,
                     'account_label' => CashMovement::treasuryAccountLabels()[$account] ?? $account,
                     'count' => $group->count(),
-                    'total' => Ariary::round($group->sum('amount')),
+                    'total' => Ariary::round($group->sum(fn ($payment) => $payment->collected_amount)),
                 ];
             })
             ->sortBy('account')
@@ -872,20 +883,23 @@ class CashierController extends Controller
             'id' => (int) $payment->id,
             'order_id' => (int) $payment->order_id,
             'amount' => Ariary::round($payment->amount),
+            'deposit_amount' => (int) $payment->deposit_amount,
+            'collected_amount' => $payment->collected_amount,
             'discount_percent' => (int) ($payment->discount_percent ?? 0),
             'discount_amount' => Ariary::round($payment->discount_amount),
             'method' => (string) ($payment->method ?? ''),
             'settlement_method' => $payment->settlement_method,
             'status' => (string) ($payment->status ?? ''),
             'reference' => $payment->reference,
-            'printed_at' => optional($payment->printed_at)->toDateTimeString(),
-            'encashed_at' => optional($payment->encashed_at)->toDateTimeString(),
-            'created_at' => optional($payment->created_at)->toDateTimeString(),
+            'printed_at' => optional($payment->printed_at)->toIso8601String(),
+            'encashed_at' => optional($payment->encashed_at)->toIso8601String(),
+            'created_at' => optional($payment->created_at)->toIso8601String(),
             'target_account' => $account,
             'target_account_label' => $account ? (CashMovement::treasuryAccountLabels()[$account] ?? $account) : null,
             'order' => [
                 'id' => (int) ($payment->order?->id ?? $payment->order_id ?? 0),
                 'order_type' => (string) ($payment->order?->order_type ?? 'dine_in'),
+                'order_label' => $payment->order?->order_label,
                 'table' => $payment->order?->table ? [
                     'table_number' => $payment->order->table->table_number,
                 ] : null,
@@ -897,99 +911,10 @@ class CashierController extends Controller
         ];
     }
 
-    private function salesBreakdownSince($since): array
+    private function assertOrderCanBePaid(Order $order): void
     {
-        $payments = Payment::query()
-            ->with([
-                'order.items.menu:id,name,category',
-            ])
-            ->where('status', 'completed')
-            ->where('encashed_at', '>=', $since)
-            ->get();
-
-        $totals = [
-            'restaurant' => 0.0,
-            'boissons' => 0.0,
-            'cocktails' => 0.0,
-        ];
-
-        foreach ($payments as $payment) {
-            $order = $payment->order;
-            if (!$order) {
-                continue;
-            }
-
-            $gross = max(0.0, Ariary::round($order->total_amount));
-            $net = max(0.0, Ariary::round($payment->amount));
-            $factor = $gross > 0 ? ($net / $gross) : 1.0;
-
-            foreach ($order->items as $item) {
-                $lineGross = Ariary::lineTotal($item->price_at_order, $item->quantity);
-                $lineNet = max(0.0, Ariary::round($lineGross * $factor));
-                $bucket = $this->salesBucket(
-                    (string) ($item->menu?->category ?? ''),
-                    (string) ($item->menu?->name ?? ''),
-                    (string) ($item->station ?? '')
-                );
-                $totals[$bucket] += $lineNet;
-            }
-        }
-
-        return [
-            'restaurant' => Ariary::round($totals['restaurant']),
-            'boissons' => Ariary::round($totals['boissons']),
-            'cocktails' => Ariary::round($totals['cocktails']),
-            'total' => Ariary::round($totals['restaurant'] + $totals['boissons'] + $totals['cocktails']),
-        ];
-    }
-
-    private function salesBucket(string $category, string $name, string $station): string
-    {
-        $normalizedCategory = $this->normalize($category);
-        $normalizedName = $this->normalize($name);
-        $normalizedStation = $this->normalize($station);
-
-        $source = trim($normalizedCategory . ' ' . $normalizedName);
-        if ($normalizedStation === 'bar') {
-            $source .= ' bar';
-        }
-
-        foreach (['cocktail', 'mocktail'] as $keyword) {
-            if ($keyword !== '' && str_contains($source, $keyword)) {
-                return 'cocktails';
-            }
-        }
-
-        foreach ([
-            'bar',
-            'boisson',
-            'boissons',
-            'drink',
-            'beverage',
-            'jus',
-            'smoothie',
-            'soda',
-            'eau',
-            'water',
-            'cafe',
-            'coffee',
-            'the',
-            'tea',
-            'infusion',
-            'nectar',
-        ] as $keyword) {
-            if ($keyword !== '' && str_contains($source, $keyword)) {
-                return 'boissons';
-            }
-        }
-
-        return 'restaurant';
-    }
-
-    private function assertBillRequestExists(Order $order): void
-    {
-        if ($this->hasOrderColumn('bill_requested_at') && empty($order->bill_requested_at)) {
-            throw new InvalidArgumentException('La demande d’addition doit être faite avant cette opération.');
+        if (in_array($order->status, ['paid', 'archived'], true)) {
+            throw new InvalidArgumentException('Cette commande est deja terminee.');
         }
     }
 
@@ -1095,6 +1020,7 @@ class CashierController extends Controller
             'payments.printed_at',
             'payments.encashed_at',
             'payments.created_at',
+            ...(Schema::hasColumn('payments', 'deposit_amount') ? ['payments.deposit_amount'] : []),
         ];
     }
 
@@ -1106,7 +1032,8 @@ class CashierController extends Controller
         float $amount,
         int $discountPercent,
         float $discountAmount
-    ): CashMovement {
+    ): ?CashMovement {
+        if ($amount <= 0) return null;
         $movement = CashMovement::create([
             'direction' => 'in',
             'status' => 'approved',
@@ -1158,32 +1085,15 @@ class CashierController extends Controller
 
     private function releaseTableIfPossible(Order $order): void
     {
-        if (!$order->table_id) {
-            return;
-        }
-
-        $table = $order->table()->lockForUpdate()->first();
-        $hasActiveOrders = Order::query()
-            ->where('table_id', $order->table_id)
-            ->where('id', '!=', $order->id)
-            ->whereIn('status', ['pending', 'preparing', 'in_kitchen', 'ready', 'served'])
-            ->where('occupies_table', true)
-            ->exists();
-
-        if ($table && !$hasActiveOrders) {
-            $table->setFree();
-        }
+        app(OrderTableService::class)->release($order);
     }
 
     private function markTableAsOccupied(Order $order): void
     {
-        if (!$order->table_id) {
-            return;
-        }
-
-        $table = $order->table()->lockForUpdate()->first();
-        if ($table) {
-            $table->setOccupied();
+        if (!$order->occupies_table) return;
+        foreach (app(OrderTableService::class)->ids($order) as $id) {
+            $table = \App\Models\RestaurantTable::whereKey($id)->lockForUpdate()->first();
+            $table?->setOccupied();
         }
     }
 

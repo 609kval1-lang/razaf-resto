@@ -3,6 +3,7 @@ import { adminAPI, resolveApiAssetUrl } from '../../services/api';
 import { getSuggestedMenuImageUrl } from '../../utils/menuImage';
 import { useDialog } from '../common/DialogProvider';
 import { isVolumeUnit } from '../../utils/units';
+import { isWholeAriary } from '../../utils/ariary';
 import DataTable from '../common/DataTable';
 
 const formatAr = (value) => {
@@ -146,6 +147,10 @@ const MenuManagement = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isWholeAriary(formData.price) || Number(formData.price) < 0) {
+      setMessage('Erreur: saisissez un prix entier en Ariary, sans decimales.');
+      return;
+    }
     try {
       const normalizedIngredients = selectedIngredients.map((item) => {
         if (!isCocktailForm) {
@@ -205,36 +210,20 @@ const MenuManagement = () => {
         }
       }
 
-      const unavailableIngredient = normalizedIngredients.find((item) => {
+      const invalidIngredient = normalizedIngredients.find((item) => {
         const ingredient = getIngredientById(item.ingredient_id);
-        return !ingredient || Number(ingredient.quantity_available || 0) <= 0;
+        const needed = Number(item.quantity_needed);
+        return !ingredient || !Number.isInteger(needed) || needed < 1;
       });
 
-      if (unavailableIngredient) {
-        setMessage('Erreur: un ingrédient sélectionné n\'est plus disponible en stock.');
-        return;
-      }
-
-      const insufficientIngredient = normalizedIngredients.find((item) => {
-        const ingredient = getIngredientById(item.ingredient_id);
-        if (!ingredient) {
-          return false;
-        }
-
-        const needed = Number(item.quantity_needed || 0);
-        const available = Number(ingredient.quantity_available || 0);
-        return needed > available;
-      });
-
-      if (insufficientIngredient) {
-        const ingredientName = getIngredientName(insufficientIngredient.ingredient_id) || 'Ingrédient';
-        setMessage(`Erreur: quantité demandée trop élevée pour ${ingredientName}.`);
+      if (invalidIngredient) {
+        setMessage('Erreur: sélectionnez un ingrédient et une quantité entière positive pour chaque ligne.');
         return;
       }
 
       const payloadIngredients = normalizedIngredients.map((item) => ({
         ingredient_id: item.ingredient_id,
-        quantity_needed: Math.max(1, Math.round(Number(item.quantity_needed || 0))),
+        quantity_needed: Number(item.quantity_needed),
       }));
 
       const menuData = buildMenuFormData(payloadIngredients);
@@ -394,14 +383,8 @@ const MenuManagement = () => {
     }
   };
 
-  const getIngredientName = (ingredientId) => {
-    const ingredient = getIngredientById(ingredientId);
-    return ingredient ? ingredient.name : '';
-  };
-
   const availableIngredients = useMemo(() => {
     return ingredients
-      .filter((ingredient) => Number(ingredient.quantity_available || 0) > 0)
       .filter((ingredient) => (isCocktailForm ? isCocktailIngredient(ingredient) : true));
   }, [ingredients, isCocktailForm]);
 
@@ -622,13 +605,18 @@ const MenuManagement = () => {
     },
     {
       key: 'is_available',
-      header: 'Disponible',
-      sortAccessor: (menu) => (menu.is_available ? 1 : 0),
-      searchAccessor: (menu) => (menu.is_available ? 'disponible' : 'indisponible'),
+      header: 'Commandable',
+      sortAccessor: (menu) => Number(menu.max_portions_available || 0),
+      searchAccessor: (menu) => `${menu.is_orderable ? 'commandable' : 'indisponible'} ${menu.availability_reason || ''}`,
       render: (menu) => (
-        <span className={`status-badge ${menu.is_available ? 'status-available' : 'status-maintenance'}`}>
-          {menu.is_available ? '✅ Disponible' : '❌ Indisponible'}
-        </span>
+        <div>
+          <span className={`status-badge ${menu.is_orderable ? 'status-available' : 'status-maintenance'}`}>
+            {menu.is_orderable ? 'Commandable' : 'Indisponible'}
+          </span>
+          <div className="form-hint">{menu.is_orderable
+            ? `${menu.max_portions_available} portion(s) possibles`
+            : (menu.availability_reason || 'Stock ou recette à vérifier')}</div>
+        </div>
       ),
     },
     {
@@ -650,13 +638,13 @@ const MenuManagement = () => {
             className="btn btn-secondary btn-sm"
             onClick={() => handleEdit(menu)}
           >
-            ✏️
+            Modifier
           </button>
           <button
             className="btn btn-danger btn-sm"
             onClick={() => handleDelete(menu.id)}
           >
-            🗑️
+            Supprimer
           </button>
         </div>
       ),
@@ -671,9 +659,9 @@ const MenuManagement = () => {
     <div>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>🍽️ Gestion des Menus</h2>
+          <h2>Gestion des Menus</h2>
           <button className="btn btn-primary" onClick={openCreateModal}>
-            ➕ Ajouter Menu
+            Ajouter Menu
           </button>
         </div>
 
@@ -693,7 +681,6 @@ const MenuManagement = () => {
         />
       </div>
 
-      {/* Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -705,8 +692,9 @@ const MenuManagement = () => {
             <form onSubmit={handleSubmit}>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Nom du menu</label>
+                  <label htmlFor="admin-menu-name">Nom du menu</label>
                   <input
+                    id="admin-menu-name"
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
@@ -716,19 +704,20 @@ const MenuManagement = () => {
                 </div>
 
                 <div className="form-group">
-                  <label>Catégorie</label>
+                  <label htmlFor="admin-menu-category">Catégorie</label>
                   <select
+                    id="admin-menu-category"
                     value={formData.category}
                     onChange={(e) => setFormData({...formData, category: e.target.value})}
                     required
                   >
-                    <option value="entree">🥗 Entrée</option>
-                    <option value="main">🍖 Plat principal</option>
-                    <option value="snack">🍔 Snack</option>
-                    <option value="dessert">🍰 Dessert</option>
-                    <option value="drink">🥤 Boisson</option>
-                    <option value="cocktail">🍸 Cocktail</option>
-                    <option value="side">🍟 Accompagnement</option>
+                    <option value="entree">Entrée</option>
+                    <option value="main">Plat principal</option>
+                    <option value="snack">Snack</option>
+                    <option value="dessert">Dessert</option>
+                    <option value="drink">Boisson</option>
+                    <option value="cocktail">Cocktail</option>
+                    <option value="side">Accompagnement</option>
                   </select>
                 </div>
               </div>
@@ -752,13 +741,9 @@ const MenuManagement = () => {
                 />
                 <div className="image-helper-row">
                   <button type="button" className="btn btn-secondary btn-sm" onClick={removeSelectedImage}>
-                    🧹 Retirer l'image
+                    Retirer l'image
                   </button>
-                  <span className="form-hint">
-                    {selectedImageFile
-                      ? `Fichier sélectionné: ${selectedImageFile.name}`
-                      : 'Sélectionne un fichier image depuis ton ordinateur (stockage local).'}
-                  </span>
+                  {selectedImageFile ? <span className="form-hint">{selectedImageFile.name}</span> : null}
                 </div>
                 <div className="menu-image-preview-wrap">
                   <img
@@ -771,11 +756,12 @@ const MenuManagement = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label>Prix de vente (Ar)</label>
+                  <label htmlFor="admin-menu-price">Prix de vente (Ar)</label>
                   <input
+                    id="admin-menu-price"
                     type="number"
                     value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: Math.max(0, roundAriary(e.target.value)) })}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                     required
                     min="0"
                     step="1"
@@ -783,13 +769,14 @@ const MenuManagement = () => {
                 </div>
 
                 <div className="form-group">
-                  <label>Disponibilité</label>
+                  <label htmlFor="admin-menu-available">Au catalogue</label>
                   <select
+                    id="admin-menu-available"
                     value={formData.is_available}
                     onChange={(e) => setFormData({...formData, is_available: e.target.value === 'true'})}
                   >
-                    <option value={true}>✅ Disponible</option>
-                    <option value={false}>❌ Indisponible</option>
+                    <option value={true}>Disponible</option>
+                    <option value={false}>Indisponible</option>
                   </select>
                 </div>
               </div>
@@ -798,21 +785,15 @@ const MenuManagement = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                   <label>Ingrédients requis</label>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={addIngredient} disabled={availableIngredients.length === 0}>
-                    ➕ Ajouter Ingrédient
+                    Ajouter Ingrédient
                   </button>
                 </div>
-
-                {isCocktailForm && (
-                  <div className="form-hint" style={{ marginBottom: '8px' }}>
-                    Mode cocktail: seuls les ingrédients buvables/liquides marqués cocktail (portion en ml) sont proposés.
-                  </div>
-                )}
 
                 {availableIngredients.length === 0 && (
                   <div className="form-hint">
                     {isCocktailForm
                       ? 'Aucun ingrédient cocktail disponible actuellement.'
-                      : 'Aucun ingrédient disponible actuellement (stock épuisé).'}
+                      : 'Aucun ingrédient configuré actuellement.'}
                   </div>
                 )}
 
@@ -894,7 +875,7 @@ const MenuManagement = () => {
                         className="btn btn-danger btn-sm"
                         onClick={() => removeIngredient(index)}
                       >
-                        🗑️
+                        Retirer
                       </button>
                     </div>
                   );

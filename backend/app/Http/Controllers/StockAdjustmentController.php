@@ -9,9 +9,6 @@ use Illuminate\Http\Request;
 
 class StockAdjustmentController extends Controller
 {
-    /**
-     * Récupérer tous les ajustements
-     */
     public function index(Request $request)
     {
         $query = StockAdjustment::with(['user']);
@@ -37,9 +34,6 @@ class StockAdjustmentController extends Controller
         return response()->json($adjustments);
     }
 
-    /**
-     * Créer un ajustement d'ingrédient
-     */
     public function adjustIngredient(Request $request, Ingredient $ingredient)
     {
         $validated = $request->validate([
@@ -55,7 +49,6 @@ class StockAdjustmentController extends Controller
             return response()->json(['error' => 'Le stock ne peut pas être négatif'], 422);
         }
 
-        // Enregistrer l'ajustement
         $adjustment = StockAdjustment::create([
             'adjustable_type' => Ingredient::class,
             'adjustable_id' => $ingredient->id,
@@ -68,7 +61,6 @@ class StockAdjustmentController extends Controller
             'new_stock' => $newStock,
         ]);
 
-        // Mettre à jour le stock
         $ingredient->update(['stock' => $newStock]);
 
         return response()->json([
@@ -78,9 +70,6 @@ class StockAdjustmentController extends Controller
         ]);
     }
 
-    /**
-     * Créer un ajustement de produit
-     */
     public function adjustProduct(Request $request, Product $product)
     {
         $validated = $request->validate([
@@ -96,7 +85,6 @@ class StockAdjustmentController extends Controller
             return response()->json(['error' => 'Le stock ne peut pas être négatif'], 422);
         }
 
-        // Enregistrer l'ajustement
         $adjustment = StockAdjustment::create([
             'adjustable_type' => Product::class,
             'adjustable_id' => $product->id,
@@ -109,7 +97,6 @@ class StockAdjustmentController extends Controller
             'new_stock' => $newStock,
         ]);
 
-        // Mettre à jour le stock
         $product->update(['stock' => $newStock]);
 
         return response()->json([
@@ -119,9 +106,6 @@ class StockAdjustmentController extends Controller
         ]);
     }
 
-    /**
-     * Récupérer les ajustements d'un ingrédient
-     */
     public function ingredientHistory(Ingredient $ingredient)
     {
         $adjustments = $ingredient->stockAdjustments()
@@ -132,9 +116,6 @@ class StockAdjustmentController extends Controller
         return response()->json($adjustments);
     }
 
-    /**
-     * Récupérer les ajustements d'un produit
-     */
     public function productHistory(Product $product)
     {
         $adjustments = $product->stockAdjustments()
@@ -145,9 +126,6 @@ class StockAdjustmentController extends Controller
         return response()->json($adjustments);
     }
 
-    /**
-     * Récupérer les statistiques des ajustements
-     */
     public function statistics(Request $request)
     {
         $query = StockAdjustment::query();

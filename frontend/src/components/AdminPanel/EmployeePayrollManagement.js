@@ -154,7 +154,8 @@ const resolvePaymentSelection = (selection) => {
 };
 
 const buildSalaryForm = (employee) => ({
-  monthly_salary: employee?.salary_profile?.monthly_salary ?? employee?.monthly_salary ?? '',
+  monthly_salary: employee?.salary_profile?.monthly_salary == null && employee?.monthly_salary == null
+    ? '' : Number(employee?.salary_profile?.monthly_salary ?? employee?.monthly_salary),
   payment_day: employee?.salary_profile?.payment_day ?? '',
   is_active: employee?.salary_profile?.is_active ?? employee?.employment_status !== 'inactive',
   notes: employee?.salary_profile?.notes || '',
@@ -631,10 +632,7 @@ const EmployeePayrollManagement = () => {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
           <div>
-            <h2>💼 Employés & paie</h2>
-            <p className="form-hint" style={{ marginTop: '6px' }}>
-              Les avances et salaires passent ici, avec un impact automatique sur la caisse, le coffre, la banque ou le mobile money selon le mode choisi.
-            </p>
+            <h2>Employés & paie</h2>
           </div>
           <button className="btn btn-secondary" type="button" onClick={() => loadSnapshot()}>
             Actualiser
@@ -651,12 +649,10 @@ const EmployeePayrollManagement = () => {
           <div className="stat-card">
             <h3>Employés suivis</h3>
             <div className="stat-number">{employees.length}</div>
-            <p>Tous les profils hors admin</p>
           </div>
           <div className="stat-card">
             <h3>Sans accès écran</h3>
             <div className="stat-number">{employees.filter((employee) => !employee.has_system_access).length}</div>
-            <p>Personnel simple géré sans connexion</p>
           </div>
           <div className="stat-card">
             <h3>Avances en cours</h3>
@@ -665,7 +661,6 @@ const EmployeePayrollManagement = () => {
                 employees.reduce((total, employee) => total + Number(employee.outstanding_advance_amount || 0), 0)
               )}
             </div>
-            <p>Somme restant à déduire des prochains salaires</p>
           </div>
         </div>
       </div>
@@ -703,7 +698,6 @@ const EmployeePayrollManagement = () => {
               <div className="stat-card">
                 <h3>Salaire mensuel</h3>
                 <div className="stat-number">{formatCurrency(selectedEmployee.monthly_salary)}</div>
-                <p>Base actuelle du profil salarial</p>
               </div>
               <div className="stat-card">
                 <h3>Avances ouvertes</h3>
@@ -713,7 +707,6 @@ const EmployeePayrollManagement = () => {
               <div className="stat-card">
                 <h3>Reste à payer ce mois</h3>
                 <div className="stat-number">{formatCurrency(selectedEmployee.salary_remaining_this_month)}</div>
-                <p>Avances ouvertes et salaire déjà couvert déduits automatiquement</p>
               </div>
             </div>
           </div>
@@ -722,9 +715,6 @@ const EmployeePayrollManagement = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
               <div>
                 <h3 style={{ marginBottom: '6px' }}>Action paie</h3>
-                <p className="form-hint">
-                  Choisis d&apos;abord si tu veux enregistrer une avance ou payer le salaire. Une seule interface d&apos;action s&apos;affiche à la fois.
-                </p>
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
@@ -743,27 +733,19 @@ const EmployeePayrollManagement = () => {
                 </button>
               </div>
             </div>
-            <div className="form-hint">
-              {activePayrollAction === 'advance'
-                ? 'Mode avance: on ajoute une nouvelle avance qui s’additionne aux précédentes.'
-                : 'Mode salaire: le brut restant du mois et la déduction des avances ouvertes sont calculés automatiquement et non modifiables.'}
-            </div>
           </div>
 
           {activePayrollAction === 'advance' ? (
             <div className="card">
               <h3 style={{ marginBottom: '10px' }}>Avance sur salaire</h3>
-              <p className="form-hint" style={{ marginBottom: '12px' }}>
-                Chaque nouvelle avance s&apos;ajoute aux précédentes, crée immédiatement un mouvement de trésorerie et sera déduite automatiquement des prochains paiements salaire.
-              </p>
               <form onSubmit={submitAdvance}>
                 <div className="form-row">
                   <div className="form-group">
                     <label>Montant (Ar)</label>
                     <input
                       type="number"
-                      min="0.01"
-                      step="0.01"
+                      min="1"
+                      step="1"
                       value={advanceForm.amount}
                       onChange={(event) => setAdvanceForm((prev) => ({ ...prev, amount: event.target.value }))}
                       required
@@ -838,9 +820,6 @@ const EmployeePayrollManagement = () => {
           ) : (
             <div className="card">
               <h3 style={{ marginBottom: '10px' }}>Paiement salaire</h3>
-              <p className="form-hint" style={{ marginBottom: '12px' }}>
-                Le brut restant du mois est affiché automatiquement. Les avances ouvertes sont déduites automatiquement pour obtenir le reste net à payer.
-              </p>
               <form onSubmit={submitSalaryPayment}>
                 <div className="form-row">
                   <div className="form-group">
@@ -964,7 +943,7 @@ const EmployeePayrollManagement = () => {
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     value={salaryForm.monthly_salary}
                     onChange={(event) => setSalaryForm((prev) => ({ ...prev, monthly_salary: event.target.value }))}
                     required
@@ -1017,9 +996,6 @@ const EmployeePayrollManagement = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
               <div>
                 <h3 style={{ marginBottom: '6px' }}>Historique</h3>
-                <p className="form-hint">
-                  Un seul historique regroupe maintenant les avances et les paiements salaire, classés par date.
-                </p>
               </div>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
@@ -1045,9 +1021,6 @@ const EmployeePayrollManagement = () => {
                 </button>
               </div>
             </div>
-            <p className="form-hint" style={{ marginBottom: '10px' }}>
-              Historique des avances et paiements pour {selectedEmployee.name}. Chaque ligne correspond à une transaction liée à la trésorerie.
-            </p>
             <DataTable
               columns={transactionColumns}
               data={filteredTransactionHistory}

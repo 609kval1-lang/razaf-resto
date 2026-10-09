@@ -54,7 +54,7 @@ const IMMEDIATE_PAYMENT_METHOD_OPTIONS = PAYMENT_METHOD_OPTIONS.filter((option) 
 const TREASURY_REFRESH_INTERVAL_MS = 5000;
 const MOVEMENT_FLOW_FILTERS = [
   { value: 'all', label: 'Tous les flux', flowTypes: [] },
-  { value: 'customer', label: 'Clients', flowTypes: ['customer_payment', 'customer_voucher_settlement'] },
+  { value: 'customer', label: 'Clients', flowTypes: ['customer_payment', 'customer_voucher_settlement', 'reservation_deposit'] },
   { value: 'supplier', label: 'Fournisseurs', flowTypes: ['supplier_payment'] },
   { value: 'employee', label: 'Employés', flowTypes: ['employee_advance_payment', 'employee_salary_payment'] },
   { value: 'transfer', label: 'Transferts', flowTypes: ['treasury_transfer'] },
@@ -143,7 +143,7 @@ const defaultTreasuryConfig = {
       hint: 'Réparation, maintenance machine ou dépannage.',
       beneficiary_label: 'Technicien / prestataire',
       beneficiary_placeholder: 'Ex: Technicien froid',
-      details_placeholder: 'Ex: Réparation congélateur bar',
+      details_placeholder: 'Ex: Réparation congélateur',
     },
     {
       value: 'delivery_transport',
@@ -597,10 +597,7 @@ const TreasuryManagement = () => {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
           <div>
-            <h2>🏛️ Trésorerie multi-comptes</h2>
-            <p className="form-hint" style={{ marginTop: '6px' }}>
-              Gérez ici les transferts et décaissements entre caisse, coffre, banque et mobile money. Les demandes envoyées depuis la caisse restent validées dans la page Mouvements de caisse.
-            </p>
+            <h2>Trésorerie multi-comptes</h2>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={() => loadData()}>
@@ -634,17 +631,14 @@ const TreasuryManagement = () => {
           <div className="stat-card">
             <h3>Total trésorerie</h3>
             <div className="stat-number">{formatCurrency(summary.total_internal_balance)}</div>
-            <p>Total cumulé des comptes internes</p>
           </div>
           <div className="stat-card">
             <h3>Caisse disponible</h3>
             <div className="stat-number">{formatCurrency(summary.cash_available)}</div>
-            <p>Solde disponible immédiatement en caisse</p>
           </div>
           <div className="stat-card">
             <h3>Demandes en attente</h3>
             <div className="stat-number">{Number(summary.pending_requests_count || 0)}</div>
-            <p>Demandes de sortie à valider dans la page caisse</p>
           </div>
           <div className="stat-card">
             <h3>Bons à encaisser</h3>
@@ -658,9 +652,6 @@ const TreasuryManagement = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
           <div>
             <h3 style={{ marginBottom: '6px' }}>Action trésorerie</h3>
-            <p className="form-hint">
-              Choisissez d&apos;abord le type d&apos;opération. Une seule interface d&apos;action s&apos;affiche à la fois.
-            </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
@@ -678,11 +669,6 @@ const TreasuryManagement = () => {
               Autres décaissements
             </button>
           </div>
-        </div>
-        <div className="form-hint">
-          {activeTreasuryAction === 'transfer'
-            ? 'Mode transfert: déplacement interne entre caisse, coffre, banque et mobile money.'
-            : 'Mode décaissement: sortie directe depuis un compte pour une autre charge du restaurant.'}
         </div>
       </div>
 
@@ -720,15 +706,14 @@ const TreasuryManagement = () => {
                     </option>
                   ))}
                 </select>
-                <div className="form-hint">Pour vider la caisse, choisissez ici le compte de dépôt.</div>
               </div>
 
               <div className="form-group">
                 <label>Montant (Ar)</label>
                 <input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="1"
+                  step="1"
                   value={transferForm.amount}
                   onChange={(event) => setTransferForm((prev) => ({ ...prev, amount: event.target.value }))}
                   required
@@ -737,7 +722,7 @@ const TreasuryManagement = () => {
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => setTransferForm((prev) => ({ ...prev, amount: String(sourceAccountBalance || '') }))}
+                    onClick={() => setTransferForm((prev) => ({ ...prev, amount: String(Math.floor(sourceAccountBalance) || '') }))}
                   >
                     Utiliser tout le solde source
                   </button>
@@ -776,12 +761,6 @@ const TreasuryManagement = () => {
       ) : (
         <div className="card">
           <h3 style={{ marginBottom: '10px' }}>Autres décaissements depuis un compte</h3>
-          <p className="form-hint" style={{ marginBottom: '12px' }}>
-            Débitez directement la caisse, le coffre, la banque ou le mobile money uniquement pour les autres charges
-            du restaurant: fournitures non consommables, factures, transport, entretien ou frais externes. Les achats de
-            matières premières et les paiements fournisseur se gèrent dans Fournisseurs, et les salaires / avances sur
-            salaire dans Employés &amp; paie.
-          </p>
           <form onSubmit={submitWithdrawal}>
             <div className="form-row">
               <div className="form-group">
@@ -804,8 +783,8 @@ const TreasuryManagement = () => {
                 <label>Montant (Ar)</label>
                 <input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="1"
+                  step="1"
                   value={withdrawalForm.amount}
                   onChange={(event) => setWithdrawalForm((prev) => ({ ...prev, amount: event.target.value }))}
                   required
@@ -814,7 +793,7 @@ const TreasuryManagement = () => {
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => setWithdrawalForm((prev) => ({ ...prev, amount: String(withdrawalSourceBalance || '') }))}
+                    onClick={() => setWithdrawalForm((prev) => ({ ...prev, amount: String(Math.floor(withdrawalSourceBalance) || '') }))}
                   >
                     Utiliser tout le solde du compte
                   </button>
@@ -835,9 +814,6 @@ const TreasuryManagement = () => {
                     </option>
                   ))}
                 </select>
-                {selectedWithdrawalReason?.hint ? (
-                  <div className="form-hint">{selectedWithdrawalReason.hint}</div>
-                ) : null}
               </div>
             </div>
 
@@ -966,14 +942,10 @@ const TreasuryManagement = () => {
             className={`btn btn-sm ${showMovementFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
             onClick={() => setShowMovementFilters((previous) => !previous)}
           >
-            <span aria-hidden="true">{showMovementFilters ? '▾' : '▸'}</span>
             <span>{showMovementFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
             {activeMovementFilterCount > 0 ? <strong>{activeMovementFilterCount}</strong> : null}
           </button>
         </div>
-        <p className="form-hint" style={{ marginBottom: '10px' }}>
-          Cet historique suit tous les comptes internes. Pour les seules sorties et validations liées à la caisse, utilise plutôt la page Mouvements de caisse.
-        </p>
         {showMovementFilters ? (
           <div className="treasury-history-toolbar">
             <div className="treasury-filter-block">
@@ -1061,9 +1033,6 @@ const TreasuryManagement = () => {
 
       <div className="card">
         <h3 style={{ marginBottom: '10px' }}>Paiements clients récents</h3>
-        <p className="form-hint" style={{ marginBottom: '10px' }}>
-          Contrôle informatif des encaissements récents: seul le cash doit alimenter la caisse, les chèques et virements la banque, et le mobile money son compte dédié.
-        </p>
         {recentCustomerPayments.length === 0 ? (
           <div className="alert-empty">Aucun paiement client récent.</div>
         ) : (

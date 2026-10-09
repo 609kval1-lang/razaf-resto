@@ -13,6 +13,9 @@ class Order extends Model
         'user_id',
         'table_id',
         'order_type',
+        'order_label',
+        'linked_table_ids',
+        'source_order_ids',
         'with_packaging',
         'packaging_quantity',
         'packaging_unit_price',
@@ -28,6 +31,10 @@ class Order extends Model
         'bill_requested_by_user_id',
         'paid_at',
         'occupies_table',
+        'checkout_source',
+        'checkout_token',
+        'stock_requirements',
+        'stock_deducted_at',
     ];
 
     protected $casts = [
@@ -42,6 +49,10 @@ class Order extends Model
         'bill_requested_at' => 'datetime',
         'paid_at' => 'datetime',
         'occupies_table' => 'boolean',
+        'stock_requirements' => 'array',
+        'linked_table_ids' => 'array',
+        'source_order_ids' => 'array',
+        'stock_deducted_at' => 'datetime',
     ];
 
     public function user()

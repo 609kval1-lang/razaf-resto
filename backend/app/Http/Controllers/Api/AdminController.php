@@ -12,8 +12,10 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Supplier;
 use App\Services\InventoryService;
+use App\Services\OrderStockService;
 use App\Services\SupplierProcurementService;
 use App\Support\Ariary;
+use App\Support\CashierDay;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -31,7 +33,7 @@ class AdminController extends Controller
 {
     private const RESERVATION_LOCK_MINUTES = 120;
     private const CACHE_KEY_SERVER_TABLES = 'server:snapshot:tables:v1';
-    private const SYSTEM_ACCESS_ROLES = ['admin', 'kitchen', 'barman', 'cashier', 'server'];
+    private const SYSTEM_ACCESS_ROLES = ['admin', 'cashier'];
 
     private const RAW_MATERIAL_ALLOWED_UNITS = [
         'kg', 'kilogramme', 'kilogrammes',
@@ -41,8 +43,6 @@ class AdminController extends Controller
         'unité', 'unités', 'unite', 'unites', 'u',
     ];
     private const INGREDIENT_ALLOWED_UNITS = self::RAW_MATERIAL_ALLOWED_UNITS;
-
-    // ============ UTILISATEURS ============
 
     public function listUsers()
     {
@@ -64,7 +64,7 @@ class AdminController extends Controller
             'has_system_access' => 'nullable|boolean',
             'job_title' => 'nullable|string|max:120',
             'employment_status' => 'nullable|in:active,inactive',
-            'monthly_salary' => 'nullable|numeric|min:0',
+            'monthly_salary' => 'nullable|numeric|min:0|decimal:0',
             'payment_day' => 'nullable|integer|min:1|max:31',
         ]);
 
@@ -133,7 +133,7 @@ class AdminController extends Controller
             'has_system_access' => 'nullable|boolean',
             'job_title' => 'nullable|string|max:120',
             'employment_status' => 'nullable|in:active,inactive',
-            'monthly_salary' => 'nullable|numeric|min:0',
+            'monthly_salary' => 'nullable|numeric|min:0|decimal:0',
             'payment_day' => 'nullable|integer|min:1|max:31',
         ]);
 
@@ -219,8 +219,6 @@ class AdminController extends Controller
         return response()->json(['message' => 'User deleted']);
     }
 
-    // ============ TABLES ============
-
     public function listTables()
     {
         $activeOrderStatuses = $this->activeOrderStatuses();
@@ -247,7 +245,7 @@ class AdminController extends Controller
             ->orderBy('table_number')
             ->get()
             ->map(function (RestaurantTable $table) {
-                $hasActiveOrders = (int) ($table->active_orders_count ?? 0) > 0;
+                $hasActiveOrders = $this->tableHasActiveOrders($table);
                 $this->expireReservationIfNeeded($table, $hasActiveOrders);
 
                 $rawRecordedStatus = (string) ($table->status ?? 'free');
@@ -369,8 +367,6 @@ class AdminController extends Controller
         return response()->json(['message' => 'Table deleted']);
     }
 
-    // ============ MATIÈRES PREMIÈRES ============
-
     public function listRawMaterials()
     {
         $materials = RawMaterial::query()
@@ -404,17 +400,17 @@ class AdminController extends Controller
         $validated = $request->validate([
             'name' => 'required|string',
             'description' => 'string|nullable',
-            'stock' => 'required|numeric|min:0.001',
+            'stock' => 'required|numeric|min:0.001|decimal:0,3',
             'unit' => ['required', 'string', Rule::in(self::RAW_MATERIAL_ALLOWED_UNITS)],
-            'cost' => 'required|numeric|min:0.01',
-            'reorder_level' => 'numeric|nullable',
+            'cost' => 'required|numeric|min:1|decimal:0',
+            'reorder_level' => 'numeric|min:0|nullable',
             'supplier_id' => ['nullable', 'integer', Rule::exists('suppliers', 'id')],
             'new_supplier' => ['nullable', 'array'],
             'new_supplier.name' => ['required_with:new_supplier', 'string', 'max:255'],
             'new_supplier.email' => ['nullable', 'email', 'max:255', Rule::unique('suppliers', 'email')],
             'new_supplier.phone' => ['nullable', 'string', 'max:30'],
             'purchase_payment_mode' => ['nullable', Rule::in(['cash', 'credit'])],
-            'purchase_initial_paid_amount' => ['nullable', 'numeric', 'min:0'],
+            'purchase_initial_paid_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0'],
             'purchase_payment_method' => ['nullable', Rule::in(['cash', 'mobile_money', 'card', 'transfer', 'check'])],
             'purchase_cash_source_account' => ['nullable', Rule::in(['cash', 'safe'])],
             'purchase_due_date' => ['nullable', 'date'],
@@ -517,12 +513,12 @@ class AdminController extends Controller
             'name' => 'string',
             'description' => 'string|nullable',
             'unit' => ['sometimes', 'string', Rule::in(self::RAW_MATERIAL_ALLOWED_UNITS)],
-            'stock' => 'numeric',
-            'cost' => 'numeric',
-            'reorder_level' => 'numeric|nullable',
+            'stock' => 'numeric|min:0|decimal:0,6',
+            'cost' => 'numeric|min:0|decimal:0',
+            'reorder_level' => 'numeric|min:0|nullable',
             'supplier_id' => ['nullable', 'integer', Rule::exists('suppliers', 'id')],
             'stock_update_mode' => ['nullable', Rule::in(['manual', 'purchase'])],
-            'purchase_unit_price' => ['nullable', 'numeric', 'min:0'],
+            'purchase_unit_price' => ['nullable', 'numeric', 'min:0', 'decimal:0'],
         ]);
 
         if (array_key_exists('unit', $validated)) {
@@ -541,7 +537,7 @@ class AdminController extends Controller
             $requestedStock = array_key_exists('stock', $validated)
                 ? (float) $validated['stock']
                 : (float) $lockedRawMaterial->stock;
-            $stockDelta = round($requestedStock - (float) $lockedRawMaterial->stock, 3);
+            $stockDelta = round($requestedStock - (float) $lockedRawMaterial->stock, RawMaterial::STOCK_DECIMAL_PLACES);
             $stockUpdateMode = (string) ($validated['stock_update_mode'] ?? ($stockDelta > 0 ? 'purchase' : 'manual'));
 
             $supplier = $this->resolveSupplierForMaterial(
@@ -618,6 +614,8 @@ class AdminController extends Controller
                 ]);
             }
 
+            app(InventoryService::class)->syncIngredientsForRawMaterial($updatedRawMaterial);
+
             return $updatedRawMaterial;
         });
 
@@ -627,7 +625,6 @@ class AdminController extends Controller
             ]);
         }
 
-        app(InventoryService::class)->syncIngredientsForRawMaterial($rawMaterial);
         return response()->json($rawMaterial);
     }
 
@@ -636,8 +633,6 @@ class AdminController extends Controller
         $rawMaterial->delete();
         return response()->json(['message' => 'Raw material deleted']);
     }
-
-    // ============ INGRÉDIENTS (PORTIONS) ============
 
     public function listIngredients(Request $request)
     {
@@ -677,7 +672,7 @@ class AdminController extends Controller
         $validated = $request->validate([
             'raw_material_id' => 'required|exists:raw_materials,id',
             'name' => 'required|string',
-            'portion_size' => 'required|numeric|min:0.01',
+            'portion_size' => 'required|numeric|min:0.01|decimal:0,2',
             'portion_unit' => ['required', 'string', Rule::in(self::INGREDIENT_ALLOWED_UNITS)],
             'quantity_available' => 'integer|nullable',
             'cost_per_portion' => 'numeric|nullable',
@@ -720,7 +715,7 @@ class AdminController extends Controller
         $validated = $request->validate([
             'raw_material_id' => 'exists:raw_materials,id',
             'name' => 'string',
-            'portion_size' => 'numeric|min:0.01',
+            'portion_size' => 'numeric|min:0.01|decimal:0,2',
             'portion_unit' => ['sometimes', 'string', Rule::in(self::INGREDIENT_ALLOWED_UNITS)],
             'quantity_available' => 'integer|nullable',
             'cost_per_portion' => 'numeric|nullable',
@@ -770,8 +765,6 @@ class AdminController extends Controller
         return response()->json(['message' => 'Ingredient deleted']);
     }
 
-    // ============ MENUS ============
-
     public function listMenus()
     {
         $menus = Menu::query()
@@ -788,11 +781,17 @@ class AdminController extends Controller
                         'ingredients.cost_per_portion',
                     ]);
                 },
+                'ingredients.rawMaterial:id,name,stock,unit,cost',
             ])
             ->get();
 
-        $menus->each(function (Menu $menu) {
+        $orderStockService = app(OrderStockService::class);
+        $menus->each(function (Menu $menu) use ($orderStockService) {
             $menu->price = Ariary::round($menu->price);
+            $availability = $orderStockService->availability($menu);
+            $menu->setAttribute('max_portions_available', $availability['max_portions_available']);
+            $menu->setAttribute('is_orderable', $availability['is_orderable']);
+            $menu->setAttribute('availability_reason', $availability['availability_reason']);
         });
 
         return response()->json($menus);
@@ -843,7 +842,7 @@ class AdminController extends Controller
         $validated = $request->validate([
             'name' => 'required|string',
             'description' => 'string|nullable',
-            'price' => 'required|numeric',
+            'price' => 'required|numeric|min:0|decimal:0',
             'category' => 'string|nullable',
             'image_url' => 'nullable|string|max:2048',
             'image_file' => 'nullable|image|mimes:jpeg,jpg,png,webp,gif|max:5120',
@@ -853,7 +852,6 @@ class AdminController extends Controller
             'ingredients.*.quantity_needed' => 'required|integer|min:1',
         ]);
 
-        $this->validateMenuIngredientAvailability($validated['ingredients'] ?? []);
         if ($this->isCocktailCategory($validated['category'] ?? null)) {
             $this->validateCocktailIngredientRules($validated['ingredients'] ?? []);
         }
@@ -913,7 +911,7 @@ class AdminController extends Controller
         $validated = $request->validate([
             'name' => 'string',
             'description' => 'string',
-            'price' => 'numeric',
+            'price' => 'numeric|min:0|decimal:0',
             'category' => 'string|nullable',
             'image_url' => 'nullable|string|max:2048',
             'image_file' => 'nullable|image|mimes:jpeg,jpg,png,webp,gif|max:5120',
@@ -922,10 +920,6 @@ class AdminController extends Controller
             'ingredients.*.ingredient_id' => ['required_with:ingredients', Rule::exists('ingredients', 'id')->whereNull('deleted_at')],
             'ingredients.*.quantity_needed' => 'required_with:ingredients|integer|min:1',
         ]);
-
-        if (array_key_exists('ingredients', $validated)) {
-            $this->validateMenuIngredientAvailability($validated['ingredients'] ?? []);
-        }
 
         $nextCategory = $validated['category'] ?? $menu->category;
         if ($this->isCocktailCategory($nextCategory)) {
@@ -1071,8 +1065,6 @@ class AdminController extends Controller
         }
     }
 
-    // ============ ANALYTICS RECETTES ============
-
     public function getRevenueReport(Request $request)
     {
         $validated = $request->validate([
@@ -1108,12 +1100,13 @@ class AdminController extends Controller
         $payments = $paymentsQuery->get();
         $orderIds = $payments->pluck('order_id')->filter()->unique()->values();
 
-        $totalRevenueNet = (float) $payments->sum(fn ($payment) => (float) $payment->amount);
-        $totalDiscount = (float) $payments->sum(fn ($payment) => (float) ($payment->discount_amount ?? 0));
+        $totalRevenueNet = (float) $payments->sum(fn ($payment) => Ariary::round($payment->amount));
+        $totalDiscount = (float) $payments->sum(fn ($payment) => Ariary::round($payment->discount_amount));
         $paymentsCount = $payments->count();
         $paidOrdersCount = $orderIds->count();
         $orderGrossTotals = [];
         $orderNetTotals = [];
+        $orderCollectedGrossTotals = [];
 
         foreach ($payments as $payment) {
             $paymentOrderId = (int) ($payment->order_id ?? 0);
@@ -1122,6 +1115,8 @@ class AdminController extends Controller
             }
 
             $orderNetTotals[$paymentOrderId] = ($orderNetTotals[$paymentOrderId] ?? 0.0) + Ariary::round($payment->amount ?? 0);
+            $orderCollectedGrossTotals[$paymentOrderId] = ($orderCollectedGrossTotals[$paymentOrderId] ?? 0.0)
+                + Ariary::round($payment->amount) + Ariary::round($payment->discount_amount);
 
             if (!array_key_exists($paymentOrderId, $orderGrossTotals)) {
                 $orderGrossTotals[$paymentOrderId] = Ariary::round($payment->order?->total_amount ?? 0);
@@ -1131,10 +1126,9 @@ class AdminController extends Controller
         $packagingQuantityTotal = 0;
         $packagingRevenueGross = 0.0;
         $packagingRevenueNet = 0.0;
+        $packagingByOrderId = [];
 
         if ($supportsPackagingPricingFields && $orderIds->isNotEmpty()) {
-            $packagingByOrderId = [];
-
             $packagingRows = DB::table('orders')
                 ->whereIn('id', $orderIds)
                 ->select(['id', 'with_packaging', 'packaging_quantity', 'packaging_unit_price'])
@@ -1153,19 +1147,6 @@ class AdminController extends Controller
                 $packagingTotal = Ariary::lineTotal($packagingUnitPrice, $packagingQuantity);
                 $packagingByOrderId[$rowOrderId] = $packagingTotal;
                 $packagingQuantityTotal += $packagingQuantity;
-                $packagingRevenueGross += $packagingTotal;
-            }
-
-            foreach ($packagingByOrderId as $orderId => $orderPackagingTotal) {
-                $grossOrderTotal = max(0.0, (float) ($orderGrossTotals[$orderId] ?? 0));
-                $netOrderTotal = max(0.0, (float) ($orderNetTotals[$orderId] ?? 0));
-
-                if ($grossOrderTotal > 0) {
-                    $discountRatio = min(1.0, $netOrderTotal / $grossOrderTotal);
-                    $packagingRevenueNet += $orderPackagingTotal * $discountRatio;
-                } else {
-                    $packagingRevenueNet += min($orderPackagingTotal, $netOrderTotal);
-                }
             }
         }
 
@@ -1173,6 +1154,22 @@ class AdminController extends Controller
             ->with('menu:id,name,category,price')
             ->whereIn('order_id', $orderIds)
             ->get();
+
+        $itemGrossAllocations = [];
+        $itemNetAllocations = [];
+        foreach ($orderItems->groupBy('order_id') as $orderId => $items) {
+            $weights = $items->mapWithKeys(fn ($item) => [
+                $item->id => Ariary::lineTotal($item->price_at_order, $item->quantity),
+            ])->all();
+            $weights['packaging'] = $packagingByOrderId[$orderId] ?? 0;
+            $grossAllocations = Ariary::allocate($orderCollectedGrossTotals[$orderId] ?? 0, $weights);
+            $netAllocations = Ariary::allocate($orderNetTotals[$orderId] ?? 0, $weights);
+            $packagingRevenueGross += $grossAllocations['packaging'];
+            $packagingRevenueNet += $netAllocations['packaging'];
+            unset($grossAllocations['packaging'], $netAllocations['packaging']);
+            $itemGrossAllocations += $grossAllocations;
+            $itemNetAllocations += $netAllocations;
+        }
 
         $menus = Menu::query()
             ->with([
@@ -1233,13 +1230,19 @@ class AdminController extends Controller
             }
 
             $quantity = (int) ($item->quantity ?? 0);
-            $lineRevenue = Ariary::lineTotal($item->price_at_order, $quantity);
-            $lineCost = (float) ($menuStatsMap[$menuId]['unit_estimated_cost'] ?? 0) * $quantity;
+            $lineRevenue = (float) ($itemGrossAllocations[$item->id] ?? 0);
+            $lineNetRevenue = (float) ($itemNetAllocations[$item->id] ?? 0);
+            $orderGross = (float) ($orderGrossTotals[$item->order_id] ?? 0);
+            // This report follows collections; split payments must not repeat the full cost each day.
+            $costRatio = $orderGross > 0
+                ? min(1.0, ($orderCollectedGrossTotals[$item->order_id] ?? 0) / $orderGross)
+                : 0;
+            $lineCost = (float) ($menuStatsMap[$menuId]['unit_estimated_cost'] ?? 0) * $quantity * $costRatio;
 
             $menuStatsMap[$menuId]['total_quantity'] += $quantity;
             $menuStatsMap[$menuId]['total_revenue'] += $lineRevenue;
             $menuStatsMap[$menuId]['total_cost'] += $lineCost;
-            $menuStatsMap[$menuId]['total_profit'] += ($lineRevenue - $lineCost);
+            $menuStatsMap[$menuId]['total_profit'] += ($lineNetRevenue - $lineCost);
         }
 
         $menuStats = collect($menuStatsMap)
@@ -1312,9 +1315,9 @@ class AdminController extends Controller
 
         $menuPricingImpact = $this->buildMenuPricingImpact($menus->values(), $menuStats);
 
-        $totalRevenueGross = (float) $menuStats->sum('total_revenue');
+        $totalRevenueGross = $totalRevenueNet + $totalDiscount;
         $totalEstimatedCost = (float) $menuStats->sum('total_cost');
-        $totalEstimatedProfit = (float) $menuStats->sum('total_profit');
+        $totalEstimatedProfit = $totalRevenueNet - $totalEstimatedCost;
 
         return response()->json([
             'filters' => [
@@ -1353,6 +1356,11 @@ class AdminController extends Controller
     private function resolveReportPeriod(string $scope): array
     {
         $now = now();
+
+        if ($scope === 'day') {
+            [$start, $nextDay] = CashierDay::bounds();
+            return [$start, $nextDay->copy()->subSecond()];
+        }
 
         return match ($scope) {
             'rolling_week' => [$now->copy()->subDays(6)->startOfDay(), $now->copy()->endOfDay()],
@@ -1642,7 +1650,8 @@ class AdminController extends Controller
                     $ingredient->cost_per_portion = round((float) ($ingredient->cost_per_portion ?? 0), 2);
                 }
 
-                $availablePortionsTotal += (int) ($ingredient->quantity_available ?? 0);
+                // Portion sizes are alternatives sharing one stock, not independent reserves.
+                $availablePortionsTotal = max($availablePortionsTotal, (int) ($ingredient->quantity_available ?? 0));
             }
 
             $material->available_portions_total = $availablePortionsTotal;
@@ -1877,55 +1886,6 @@ class AdminController extends Controller
         ]);
     }
 
-    private function validateMenuIngredientAvailability(array $ingredients): void
-    {
-        if (empty($ingredients)) {
-            return;
-        }
-
-        $ingredientIds = collect($ingredients)
-            ->pluck('ingredient_id')
-            ->map(fn ($id) => (int) $id)
-            ->unique()
-            ->values();
-
-        $ingredientMap = Ingredient::query()
-            ->whereIn('id', $ingredientIds)
-            ->get()
-            ->keyBy('id');
-
-        $errors = [];
-
-        foreach ($ingredients as $index => $item) {
-            $ingredientId = (int) ($item['ingredient_id'] ?? 0);
-            $quantityNeeded = (int) ($item['quantity_needed'] ?? 0);
-            $ingredient = $ingredientMap->get($ingredientId);
-
-            if (!$ingredient) {
-                continue;
-            }
-
-            $available = (int) ($ingredient->quantity_available ?? 0);
-
-            if ($available <= 0) {
-                $errors["ingredients.$index.ingredient_id"] = [
-                    "L'ingrédient {$ingredient->name} n'est pas disponible.",
-                ];
-                continue;
-            }
-
-            if ($quantityNeeded > $available) {
-                $errors["ingredients.$index.quantity_needed"] = [
-                    "Quantité demandée trop élevée pour {$ingredient->name} (disponible: {$available}).",
-                ];
-            }
-        }
-
-        if (!empty($errors)) {
-            throw ValidationException::withMessages($errors);
-        }
-    }
-
     private function activeOrderStatuses(): array
     {
         return ['pending', 'preparing', 'in_kitchen', 'ready', 'served'];
@@ -1933,10 +1893,7 @@ class AdminController extends Controller
 
     private function tableHasActiveOrders(RestaurantTable $table): bool
     {
-        return $table->orders()
-            ->whereIn('status', $this->activeOrderStatuses())
-            ->where('occupies_table', true)
-            ->exists();
+        return app(\App\Services\OrderTableService::class)->activeFor($table->id)->exists();
     }
 
     private function isReservedTableLocked(RestaurantTable $table): bool

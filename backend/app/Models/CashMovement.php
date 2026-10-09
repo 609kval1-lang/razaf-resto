@@ -67,6 +67,7 @@ class CashMovement extends Model
         return [
             'customer_payment' => 'Encaissement client',
             'customer_voucher_settlement' => 'Encaissement bon client',
+            'reservation_deposit' => 'Acompte de reservation',
             'supplier_payment' => 'Paiement fournisseur',
             'employee_advance_payment' => 'Avance employee',
             'employee_salary_payment' => 'Paiement salaire',
@@ -114,6 +115,7 @@ class CashMovement extends Model
         }
 
         if ((string) $this->direction === 'in') {
+            if ($this->flow_type === 'reservation_deposit') return 'deposit';
             return 'sale';
         }
 

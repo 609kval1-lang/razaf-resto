@@ -25,9 +25,9 @@ class CrudApiTest extends TestCase
         return $admin;
     }
 
-    private function actingAsServer(): User
+    private function actingAsCashier(): User
     {
-        $server = User::factory()->create(['role' => 'server', 'has_system_access' => true]);
+        $server = User::factory()->create(['role' => 'cashier', 'has_system_access' => true]);
         Sanctum::actingAs($server);
 
         return $server;
@@ -41,7 +41,7 @@ class CrudApiTest extends TestCase
             'name' => 'Serveur Test',
             'email' => 'serveur@test.local',
             'password' => 'secret123',
-            'role' => 'server',
+            'role' => 'cashier',
             'has_system_access' => true,
             'job_title' => null,
             'employment_status' => 'active',
@@ -51,8 +51,8 @@ class CrudApiTest extends TestCase
 
         $createResponse->assertCreated()
             ->assertJsonPath('name', 'Serveur Test')
-            ->assertJsonPath('role', 'server')
-            ->assertJsonPath('job_title', 'Serveur')
+            ->assertJsonPath('role', 'cashier')
+            ->assertJsonPath('job_title', 'Caisse')
             ->assertJsonPath('salary_profile.monthly_salary', '180000.00')
             ->assertJsonPath('salary_profile.payment_day', 28);
 
@@ -115,7 +115,7 @@ class CrudApiTest extends TestCase
         $this->assertSoftDeleted('tables', ['id' => $tableId]);
     }
 
-    public function test_admin_can_crud_raw_materials_without_automatic_supplier_purchase(): void
+    public function test_admin_can_crud_raw_materials_and_manually_adjust_stock_without_an_extra_purchase(): void
     {
         $this->actingAsAdmin();
 
@@ -137,13 +137,16 @@ class CrudApiTest extends TestCase
 
         $createResponse->assertCreated()
             ->assertJsonPath('name', 'Creme fraiche')
-            ->assertJsonPath('stock', '12.00');
+            ->assertJsonPath('stock', '12.000000');
 
         $rawMaterialId = (int) $createResponse->json('id');
 
-        $this->assertDatabaseMissing('supplier_purchases', [
+        $this->assertDatabaseHas('supplier_purchases', [
             'supplier_id' => $supplier->id,
             'raw_material_id' => $rawMaterialId,
+            'quantity' => 12,
+            'total_amount' => 102000,
+            'remaining_amount' => 102000,
         ]);
 
         $this->getJson('/api/admin/raw-materials')
@@ -157,7 +160,9 @@ class CrudApiTest extends TestCase
             'stock_update_mode' => 'manual',
         ])->assertOk()
             ->assertJsonPath('description', 'Brique 1L UHT')
-            ->assertJsonPath('stock', '14.00');
+            ->assertJsonPath('stock', '14.000000');
+
+        $this->assertDatabaseCount('supplier_purchases', 1);
 
         $this->deleteJson("/api/admin/raw-materials/{$rawMaterialId}")
             ->assertOk();
@@ -210,7 +215,7 @@ class CrudApiTest extends TestCase
 
     public function test_non_admin_cannot_access_admin_routes(): void
     {
-        $this->actingAsServer();
+        $this->actingAsCashier();
 
         $this->getJson('/api/admin/users')->assertStatus(403);
         $this->postJson('/api/admin/tables', [
@@ -222,142 +227,22 @@ class CrudApiTest extends TestCase
         $this->getJson('/api/admin/suppliers')->assertStatus(403);
     }
 
-    public function test_server_can_list_customers_and_create_order_when_stock_is_available(): void
-    {
-        $this->actingAsServer();
-
-        $table = RestaurantTable::query()->create([
-            'table_number' => 9,
-            'capacity' => 4,
-            'section' => 'Salle',
-            'status' => 'free',
-        ]);
-
-        $customer = Customer::query()->create([
-            'name' => 'Client stock',
-            'email' => 'stock@test.dev',
-            'phone' => '+261330000001',
-        ]);
-
-        $rawMaterial = RawMaterial::query()->create([
-            'name' => 'Poulet brut',
-            'description' => null,
-            'stock' => 2.00,
-            'unit' => 'kg',
-            'cost' => 12000,
-            'reorder_level' => 0.50,
-        ]);
-
-        $ingredient = Ingredient::query()->create([
-            'raw_material_id' => $rawMaterial->id,
-            'name' => 'Poulet portion 250g',
-            'portion_size' => 250,
-            'portion_unit' => 'g',
-            'quantity_available' => 8,
-            'cost_per_portion' => 3000,
-        ]);
-
-        $menu = Menu::query()->create([
-            'name' => 'Poulet Grille',
-            'description' => 'Test',
-            'price' => 12000,
-            'category' => 'Plats',
-            'is_available' => true,
-        ]);
-        $menu->ingredients()->attach($ingredient->id, ['quantity_needed' => 2]);
-
-        $this->getJson('/api/server/customers')
-            ->assertOk()
-            ->assertJsonFragment(['name' => 'Client stock']);
-
-        $response = $this->postJson('/api/server/orders', [
-            'table_id' => $table->id,
-            'customer_id' => $customer->id,
-            'items' => [
-                [
-                    'menu_id' => $menu->id,
-                    'quantity' => 2,
-                ],
-            ],
-        ]);
-
-        $response->assertCreated()
-            ->assertJsonPath('customer_id', $customer->id)
-            ->assertJsonPath('items.0.quantity', 2)
-            ->assertJsonPath('table_id', $table->id);
-
-        $ingredient->refresh();
-        $rawMaterial->refresh();
-
-        $this->assertSame(4, (int) $ingredient->quantity_available);
-        $this->assertEquals(1.0, (float) $rawMaterial->stock);
-    }
-
-    public function test_server_cannot_create_order_when_stock_is_insufficient_without_confirmation(): void
-    {
-        $this->actingAsServer();
-
-        $table = RestaurantTable::query()->create([
-            'table_number' => 12,
-            'capacity' => 4,
-            'section' => 'Salle',
-            'status' => 'free',
-        ]);
-
-        $rawMaterial = RawMaterial::query()->create([
-            'name' => 'Steak',
-            'description' => null,
-            'stock' => 0.50,
-            'unit' => 'kg',
-            'cost' => 22000,
-            'reorder_level' => 0.20,
-        ]);
-
-        $ingredient = Ingredient::query()->create([
-            'raw_material_id' => $rawMaterial->id,
-            'name' => 'Steak portion 250g',
-            'portion_size' => 250,
-            'portion_unit' => 'g',
-            'quantity_available' => 2,
-            'cost_per_portion' => 5500,
-        ]);
-
-        $menu = Menu::query()->create([
-            'name' => 'Steak Frites',
-            'description' => 'Test',
-            'price' => 18000,
-            'category' => 'Plats',
-            'is_available' => true,
-        ]);
-        $menu->ingredients()->attach($ingredient->id, ['quantity_needed' => 2]);
-
-        $response = $this->postJson('/api/server/orders', [
-            'table_id' => $table->id,
-            'items' => [
-                [
-                    'menu_id' => $menu->id,
-                    'quantity' => 2,
-                ],
-            ],
-        ]);
-
-        $response->assertStatus(409)
-            ->assertJsonPath('require_confirmation', true);
-    }
-
-    public function test_admin_menu_prices_are_rounded_to_whole_ariary(): void
+    public function test_admin_menu_prices_require_whole_ariary_without_silent_rounding(): void
     {
         $this->actingAsAdmin();
 
-        $createResponse = $this->postJson('/api/admin/menus', [
-            'name' => 'Menu arrondi',
+        $payload = [
+            'name' => 'Menu entier',
             'description' => 'Prix entier ariary',
             'price' => 8034.98,
             'category' => 'main',
             'is_available' => true,
             'ingredients' => [],
-        ]);
-
+        ];
+        $this->postJson('/api/admin/menus', $payload)->assertUnprocessable()->assertJsonValidationErrors('price');
+        $this->assertDatabaseCount('menus', 0);
+        $payload['price'] = 8035;
+        $createResponse = $this->postJson('/api/admin/menus', $payload);
         $createResponse->assertCreated();
 
         $menuId = (int) $createResponse->json('id');
@@ -371,7 +256,9 @@ class CrudApiTest extends TestCase
 
         $this->putJson("/api/admin/menus/{$menuId}", [
             'price' => 12000.51,
-        ])->assertOk();
+        ])->assertUnprocessable()->assertJsonValidationErrors('price');
+        $this->assertSame(8035.0, (float) $menu->fresh()->price);
+        $this->putJson("/api/admin/menus/{$menuId}", ['price' => 12001])->assertOk();
 
         $menu->refresh();
         $this->assertSame(12001.0, (float) $menu->price);

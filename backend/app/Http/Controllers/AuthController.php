@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\Password;
 
 class AuthController extends Controller
 {
-    // Inscription
     public function register(Request $request)
     {
         $request->validate([
@@ -43,7 +42,7 @@ class AuthController extends Controller
         'email' => 'required|string|email|unique:users,email',
     ]);
 
-    $user = $request->user(); // récupère l’utilisateur connecté
+    $user = $request->user();
     $user->email = $request->email;
     $user->save();
 
@@ -65,7 +64,7 @@ class AuthController extends Controller
 
          if (!$user || empty($user->password) || !Hash::check($request->password, $user->password)) {
         return response()->json([
-            'error' => __('auth.failed') // récupère la traduction française
+            'error' => __('auth.failed')
         ], 401);
     }
 
@@ -73,6 +72,10 @@ class AuthController extends Controller
             return response()->json([
                 'error' => 'Ce profil employe ne dispose pas d\'un acces au systeme.',
             ], 403);
+        }
+
+        if (!in_array($user->role, ['admin', 'cashier'], true)) {
+            return response()->json(['error' => 'Ce role est archive. Un administrateur doit attribuer un acces admin ou caisse.'], 403);
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;

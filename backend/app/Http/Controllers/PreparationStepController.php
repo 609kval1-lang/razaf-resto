@@ -8,9 +8,6 @@ use Illuminate\Http\Request;
 
 class PreparationStepController extends Controller
 {
-    /**
-     * Display a listing of preparation steps for a product
-     */
     public function index(Product $product)
     {
         return response()->json(
@@ -18,9 +15,6 @@ class PreparationStepController extends Controller
         );
     }
 
-    /**
-     * Store a newly created preparation step
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -36,17 +30,11 @@ class PreparationStepController extends Controller
         return response()->json($step, 201);
     }
 
-    /**
-     * Display the specified preparation step
-     */
     public function show(PreparationStep $preparationStep)
     {
         return response()->json($preparationStep);
     }
 
-    /**
-     * Update the specified preparation step
-     */
     public function update(Request $request, PreparationStep $preparationStep)
     {
         $validated = $request->validate([
@@ -61,9 +49,6 @@ class PreparationStepController extends Controller
         return response()->json($preparationStep);
     }
 
-    /**
-     * Remove the specified preparation step
-     */
     public function destroy(PreparationStep $preparationStep)
     {
         $preparationStep->delete();
@@ -71,9 +56,6 @@ class PreparationStepController extends Controller
         return response()->json(['message' => 'Preparation step deleted successfully']);
     }
 
-    /**
-     * Reorder preparation steps
-     */
     public function reorder(Request $request, Product $product)
     {
         $validated = $request->validate([

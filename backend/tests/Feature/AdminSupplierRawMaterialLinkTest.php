@@ -950,7 +950,7 @@ class AdminSupplierRawMaterialLinkTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('stock', '15.00');
+            ->assertJsonPath('stock', '15.000000');
 
         $this->assertDatabaseHas('supplier_purchases', [
             'id' => $existingPurchase->id,

@@ -65,9 +65,6 @@ class IngredientController extends Controller
         ]);
     }
 
-    /**
-     * Get low stock ingredients
-     */
     public function lowStock()
     {
         $ingredients = Ingredient::whereRaw('stock <= reorder_level')->get();

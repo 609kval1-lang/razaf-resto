@@ -9,6 +9,8 @@ class RawMaterial extends Model
 {
     use SoftDeletes;
 
+    public const STOCK_DECIMAL_PLACES = 6;
+
     protected $fillable = [
         'name',
         'description',
@@ -19,9 +21,9 @@ class RawMaterial extends Model
     ];
 
     protected $casts = [
-        'stock' => 'decimal:2',
+        'stock' => 'decimal:6',
         'cost' => 'decimal:2',
-        'reorder_level' => 'decimal:2',
+        'reorder_level' => 'decimal:6',
     ];
 
     public function ingredients()

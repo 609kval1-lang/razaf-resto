@@ -9,6 +9,7 @@ class Payment extends Model
     protected $fillable = [
         'order_id',
         'amount',
+        'deposit_amount',
         'discount_percent',
         'discount_amount',
         'method',
@@ -21,6 +22,7 @@ class Payment extends Model
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'deposit_amount' => 'integer',
         'discount_amount' => 'decimal:2',
         'discount_percent' => 'integer',
         'printed_at' => 'datetime',
@@ -30,6 +32,11 @@ class Payment extends Model
     public function order()
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function getCollectedAmountAttribute(): float
+    {
+        return max(0, (float) $this->amount - (int) $this->deposit_amount);
     }
 
     public function markAsCompleted(): bool

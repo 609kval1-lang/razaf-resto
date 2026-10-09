@@ -10,7 +10,6 @@ use InvalidArgumentException;
 class InventoryService
 {
     private const UNIT_MAP = [
-        // Mass
         'kg' => ['dimension' => 'mass', 'factor' => 1000.0],
         'kilogramme' => ['dimension' => 'mass', 'factor' => 1000.0],
         'kilogrammes' => ['dimension' => 'mass', 'factor' => 1000.0],
@@ -19,13 +18,11 @@ class InventoryService
         'gramme' => ['dimension' => 'mass', 'factor' => 1.0],
         'grammes' => ['dimension' => 'mass', 'factor' => 1.0],
         'mg' => ['dimension' => 'mass', 'factor' => 0.001],
-        // Volume
         'l' => ['dimension' => 'volume', 'factor' => 1000.0],
         'litre' => ['dimension' => 'volume', 'factor' => 1000.0],
         'litres' => ['dimension' => 'volume', 'factor' => 1000.0],
         'ml' => ['dimension' => 'volume', 'factor' => 1.0],
         'cl' => ['dimension' => 'volume', 'factor' => 10.0],
-        // Count
         'pcs' => ['dimension' => 'count', 'factor' => 1.0],
         'pc' => ['dimension' => 'count', 'factor' => 1.0],
         'piece' => ['dimension' => 'count', 'factor' => 1.0],
@@ -54,7 +51,10 @@ class InventoryService
             $portionUnit
         );
 
-        $quantityAvailable = (int) floor($stockInPortionUnit / $portionSize);
+        $portionRatio = $stockInPortionUnit / $portionSize;
+        // Correct binary rounding at exact integer boundaries, not real shortages.
+        $tolerance = PHP_FLOAT_EPSILON * max(1.0, abs($portionRatio)) * 8;
+        $quantityAvailable = (int) floor($portionRatio + $tolerance);
         if ($quantityAvailable < 0) {
             $quantityAvailable = 0;
         }

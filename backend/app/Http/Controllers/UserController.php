@@ -7,9 +7,6 @@ use Illuminate\Http\Request;
 
 class UserController extends Controller
 {
-    /**
-     * Get all users with role management
-     */
     public function index()
     {
         $users = User::select('id', 'name', 'email', 'role', 'created_at')
@@ -19,17 +16,11 @@ class UserController extends Controller
         return response()->json($users);
     }
 
-    /**
-     * Get a single user
-     */
     public function show(User $user)
     {
         return response()->json($user);
     }
 
-    /**
-     * Update user role
-     */
     public function updateRole(Request $request, User $user)
     {
         $validated = $request->validate([
@@ -44,9 +35,6 @@ class UserController extends Controller
         ]);
     }
 
-    /**
-     * Delete a user
-     */
     public function destroy(User $user)
     {
         $user->delete();

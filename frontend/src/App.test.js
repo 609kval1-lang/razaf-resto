@@ -47,9 +47,12 @@ jest.mock('./components/common/ToastProvider', () => ({
 
 import App from './App';
 
-test('renders the application shell without crashing', () => {
+test('renders the application shell without crashing', async () => {
   render(<App />);
 
   expect(screen.getByTestId('router')).toBeInTheDocument();
-  expect(screen.getByText('login-screen')).toBeInTheDocument();
+  expect(await screen.findByText('login-screen')).toBeInTheDocument();
+  expect(screen.queryByText('server-dashboard')).not.toBeInTheDocument();
+  expect(screen.queryByText('kitchen-dashboard')).not.toBeInTheDocument();
+  expect(screen.queryByText('barman-dashboard')).not.toBeInTheDocument();
 });

@@ -110,7 +110,6 @@ const api = axios.create({
   },
 });
 
-// Intercepteur pour ajouter le token automatiquement
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -124,7 +123,6 @@ api.interceptors.request.use(
   }
 );
 
-// Intercepteur pour gérer les erreurs d'authentification
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -139,7 +137,6 @@ api.interceptors.response.use(
 
 export default api;
 
-// ============ AUTHENTICATION ============
 export const authAPI = {
   login: (credentials) => api.post('/login', credentials),
   changePassword: (payload) => api.put('/auth/password', payload),
@@ -156,35 +153,29 @@ export const authAPI = {
   getCurrentUser: () => api.get('/user'),
 };
 
-// ============ ADMIN API ============
 export const adminAPI = {
-  // Users
   getUsers: () => api.get('/admin/users'),
   getSummary: () => api.get('/admin/summary'),
   createUser: (userData) => api.post('/admin/users', userData),
   updateUser: (userId, userData) => api.put(`/admin/users/${userId}`, userData),
   deleteUser: (userId) => api.delete(`/admin/users/${userId}`),
 
-  // Tables
   getTables: () => api.get('/admin/tables'),
   createTable: (tableData) => api.post('/admin/tables', tableData),
   updateTable: (tableId, tableData) => api.put(`/admin/tables/${tableId}`, tableData),
   deleteTable: (tableId) => api.delete(`/admin/tables/${tableId}`),
 
-  // Raw Materials
   getRawMaterials: (params) => api.get('/admin/raw-materials', { params }),
   getRawMaterialPriceVariations: () => api.get('/admin/raw-materials/price-variations'),
   createRawMaterial: (materialData) => api.post('/admin/raw-materials', materialData),
   updateRawMaterial: (materialId, materialData) => api.put(`/admin/raw-materials/${materialId}`, materialData),
   deleteRawMaterial: (materialId) => api.delete(`/admin/raw-materials/${materialId}`),
 
-  // Ingredients
   getIngredients: () => api.get('/admin/ingredients'),
   createIngredient: (ingredientData) => api.post('/admin/ingredients', ingredientData),
   updateIngredient: (ingredientId, ingredientData) => api.put(`/admin/ingredients/${ingredientId}`, ingredientData),
   deleteIngredient: (ingredientId) => api.delete(`/admin/ingredients/${ingredientId}`),
 
-  // Menus
   getMenus: () => api.get('/admin/menus'),
   createMenu: (menuData) => {
     if (menuData instanceof FormData) {
@@ -214,10 +205,8 @@ export const adminAPI = {
   },
   deleteMenu: (menuId) => api.delete(`/admin/menus/${menuId}`),
 
-  // Revenue analytics
   getRevenueReport: (params) => api.get('/admin/revenue-report', { params }),
 
-  // Cash register movements
   getCashMovements: (params) => api.get('/admin/cash-movements', { params }),
   getTreasurySnapshot: () => api.get('/admin/treasury'),
   createTreasuryTransfer: (payload) => api.post('/admin/treasury/transfers', payload),
@@ -227,7 +216,6 @@ export const adminAPI = {
   rejectCashMovement: (movementId, payload) => api.post(`/admin/cash-movements/${movementId}/reject`, payload || {}),
   createAdminCashWithdrawal: (payload) => api.post('/admin/cash-movements/withdrawals/direct', payload),
 
-  // Suppliers
   getSuppliers: () => api.get('/admin/suppliers'),
   getSupplierPayablesAlerts: () => api.get('/admin/suppliers/payables/alerts'),
   getSupplierLedger: (supplierId) => api.get(`/admin/suppliers/${supplierId}/ledger`),
@@ -238,52 +226,17 @@ export const adminAPI = {
   updateSupplier: (supplierId, supplierData) => api.put(`/admin/suppliers/${supplierId}`, supplierData),
   deleteSupplier: (supplierId) => api.delete(`/admin/suppliers/${supplierId}`),
 
-  // Employees & payroll
   getEmployeePayrollSnapshot: () => api.get('/admin/employees/payroll'),
   upsertEmployeeSalaryProfile: (userId, payload) => api.put(`/admin/employees/${userId}/salary-profile`, payload),
   createEmployeeAdvance: (userId, payload) => api.post(`/admin/employees/${userId}/payroll/advances`, payload),
   createEmployeeSalaryPayment: (userId, payload) => api.post(`/admin/employees/${userId}/payroll/salaries`, payload),
 };
 
-// ============ SERVER API ============
-export const serverAPI = {
-  getDashboardSnapshot: (params) => api.get('/server/snapshot', { params }),
-  getAvailableTables: () => api.get('/server/tables'),
-  getCustomers: () => api.get('/server/customers'),
-  getCustomerInsights: (customerId) => api.get(`/server/customers/${customerId}/insights`),
-  getMenus: () => api.get('/server/menus'),
-  createOrder: (orderData) => api.post('/server/orders', orderData),
-  markOrderItemServed: (itemId) => api.post(`/server/order-items/${itemId}/serve`),
-  requestBill: (orderId) => api.post(`/server/orders/${orderId}/request-bill`),
-  getMyOrders: (params) => api.get('/server/my-orders', { params }),
-};
-
-// ============ KITCHEN API ============
-export const kitchenAPI = {
-  getIngredientsStatus: () => api.get('/kitchen/ingredients'),
-  getPendingOrders: (params) => api.get('/kitchen/orders', { params }),
-  startOrderItem: (itemId) => api.post(`/kitchen/order-items/${itemId}/start`),
-  markOrderItemReady: (itemId) => api.post(`/kitchen/order-items/${itemId}/ready`),
-  startOrder: (orderId) => api.post(`/kitchen/orders/${orderId}/start`),
-  markOrderReady: (orderId) => api.post(`/kitchen/orders/${orderId}/ready`),
-  getOrderHistory: (params) => api.get('/kitchen/history', { params }),
-  getKitchenStats: () => api.get('/kitchen/stats'),
-};
-
-// ============ BAR API ============
-export const barAPI = {
-  getIngredientsStatus: () => api.get('/bar/ingredients'),
-  getPendingOrders: (params) => api.get('/bar/orders', { params }),
-  startOrderItem: (itemId) => api.post(`/bar/order-items/${itemId}/start`),
-  markOrderItemReady: (itemId) => api.post(`/bar/order-items/${itemId}/ready`),
-  startOrder: (orderId) => api.post(`/bar/orders/${orderId}/start`),
-  markOrderReady: (orderId) => api.post(`/bar/orders/${orderId}/ready`),
-  getOrderHistory: (params) => api.get('/bar/history', { params }),
-  getKitchenStats: () => api.get('/bar/stats'),
-};
-
-// ============ CASHIER API ============
 export const cashierAPI = {
+  getOrderEntryTables: () => api.get('/cashier/order-entry/tables'),
+  getOrderEntryMenus: (params) => api.get('/cashier/order-entry/menus', { params }),
+  createOrderEntry: (payload) => api.post('/cashier/order-entry/orders', payload),
+  getAvailability: () => api.get('/cashier/availability'),
   getReadyOrders: (params) => api.get('/cashier/orders', { params }),
   getCustomers: () => api.get('/cashier/customers'),
   preparePayment: (orderId, paymentData) => api.post(`/cashier/orders/${orderId}/prepare-payment`, paymentData),
@@ -294,4 +247,7 @@ export const cashierAPI = {
   getPaymentHistory: (params) => api.get('/cashier/history', { params }),
   getCashMovements: () => api.get('/cashier/cash-movements'),
   requestCashWithdrawal: (payload) => api.post('/cashier/cash-movements/withdrawals', payload),
+  getReservationDeposits: () => api.get('/cashier/reservation-deposits'),
+  receiveReservationDeposit: (payload) => api.post('/cashier/reservation-deposits', payload),
+  redistributeAdditions: (payload) => api.post('/cashier/order-entry/redistribute', payload),
 };

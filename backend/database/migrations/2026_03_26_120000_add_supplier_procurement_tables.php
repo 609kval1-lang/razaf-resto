@@ -46,7 +46,7 @@ return new class extends Migration
                     ->constrained('supplier_purchases')
                     ->cascadeOnDelete();
                 $table->decimal('amount', 12, 2);
-                $table->enum('method', ['cash', 'card', 'transfer', 'check'])->default('cash');
+                $table->enum('method', ['cash', 'card', 'mobile_money', 'transfer', 'check'])->default('cash');
                 $table->string('reference', 120)->nullable();
                 $table->text('note')->nullable();
                 $table->dateTime('paid_at');
@@ -100,4 +100,3 @@ return new class extends Migration
         }
     }
 };
-

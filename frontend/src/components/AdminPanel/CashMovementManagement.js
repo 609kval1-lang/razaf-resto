@@ -88,9 +88,8 @@ const defaultSummary = {
 };
 
 const defaultRevenue = {
-  restaurant: 0,
-  boissons: 0,
-  cocktails: 0,
+  dishes: 0,
+  drinks: 0,
   total: 0,
 };
 
@@ -238,7 +237,7 @@ const CashMovementManagement = () => {
             title="Valider la sortie de caisse"
             aria-label={`Valider la sortie de caisse ${movement.reference || movement.id}`}
           >
-            <span className="cash-request-action-icon" aria-hidden="true">✅</span>
+            <span className="cash-request-action-icon" aria-hidden="true" />
             <span>{processingId === movement.id ? 'Validation...' : 'Valider'}</span>
           </button>
           <button
@@ -248,7 +247,7 @@ const CashMovementManagement = () => {
             title="Refuser la sortie de caisse"
             aria-label={`Refuser la sortie de caisse ${movement.reference || movement.id}`}
           >
-            <span className="cash-request-action-icon" aria-hidden="true">❌</span>
+            <span className="cash-request-action-icon" aria-hidden="true" />
             <span>{processingId === movement.id ? 'Traitement...' : 'Refuser'}</span>
           </button>
         </div>
@@ -336,10 +335,7 @@ const CashMovementManagement = () => {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
           <div>
-            <h2>🏦 Caisse: demandes et validation</h2>
-            <p className="form-hint" style={{ marginTop: '6px' }}>
-              Cette page est réservée à la caisse: suivi du cash du jour, demandes de sortie envoyées par la caisse, validation admin et historique qui touchent réellement la caisse.
-            </p>
+            <h2>Caisse: demandes et validation</h2>
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={() => loadData()}>
@@ -361,17 +357,14 @@ const CashMovementManagement = () => {
           <div className="stat-card">
             <h3>Caisse disponible</h3>
             <div className="stat-number">{formatCurrency(summary.cash_available)}</div>
-            <p>Entrees cash - sorties validées</p>
           </div>
           <div className="stat-card">
             <h3>Entrees cash (jour)</h3>
             <div className="stat-number">{formatCurrency(summary.entries_today)}</div>
-            <p>Cash entré aujourd&apos;hui</p>
           </div>
           <div className="stat-card">
             <h3>Sorties validées (jour)</h3>
             <div className="stat-number">{formatCurrency(summary.exits_today)}</div>
-            <p>Sorties qui débitent réellement la caisse</p>
           </div>
           <div className="stat-card">
             <h3>Sorties en attente</h3>
@@ -382,24 +375,16 @@ const CashMovementManagement = () => {
 
         <div className="stats-grid">
           <div className="stat-card">
-            <h3>Recettes restaurant (jour)</h3>
-            <div className="stat-number">{formatCurrency(revenue.restaurant)}</div>
-            <p>Commandes restaurant</p>
+            <h3>Plats (emballages inclus)</h3>
+            <div className="stat-number">{formatCurrency(revenue.dishes)}</div>
           </div>
           <div className="stat-card">
-            <h3>Recettes boissons (jour)</h3>
-            <div className="stat-number">{formatCurrency(revenue.boissons)}</div>
-            <p>Boissons hors cocktails</p>
+            <h3>Boissons (cocktails inclus)</h3>
+            <div className="stat-number">{formatCurrency(revenue.drinks)}</div>
           </div>
           <div className="stat-card">
-            <h3>Recettes cocktails (jour)</h3>
-            <div className="stat-number">{formatCurrency(revenue.cocktails)}</div>
-            <p>Commandes cocktails</p>
-          </div>
-          <div className="stat-card">
-            <h3>Total recettes (jour)</h3>
+            <h3>CA du jour</h3>
             <div className="stat-number">{formatCurrency(revenue.total)}</div>
-            <p>Encaissements nets ventilés</p>
           </div>
         </div>
       </div>
@@ -421,9 +406,6 @@ const CashMovementManagement = () => {
 
       <div className="card">
         <h3 style={{ marginBottom: '10px' }}>Historique caisse</h3>
-        <p className="form-hint" style={{ marginBottom: '10px' }}>
-          Cet historique ne montre que les mouvements qui alimentent ou vident réellement la caisse. La banque, le coffre et le mobile money se suivent dans la page Trésorerie.
-        </p>
         {movements.length === 0 ? (
           <div className="alert-empty">Aucun mouvement de caisse.</div>
         ) : (
@@ -437,23 +419,6 @@ const CashMovementManagement = () => {
         )}
       </div>
 
-      <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Quand utiliser cette page ?</h3>
-        <div className="stats-grid">
-          <div className="stat-card">
-            <h3>Ici</h3>
-            <p>Valider ou refuser les demandes de sortie envoyées depuis la caisse, puis contrôler l&apos;historique cash du restaurant.</p>
-          </div>
-          <div className="stat-card">
-            <h3>Dans Trésorerie</h3>
-            <p>Faire les décaissements admin depuis la caisse, le coffre, la banque ou le mobile money, et gérer les transferts entre comptes.</p>
-          </div>
-          <div className="stat-card">
-            <h3>Autres flux</h3>
-            <p>Les achats fournisseurs restent dans Fournisseurs, et les avances ou salaires dans Employés &amp; paie.</p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };

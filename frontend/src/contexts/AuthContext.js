@@ -18,13 +18,11 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (token) {
-      // Vérifier si le token est valide
       authAPI.getCurrentUser()
         .then(response => {
           setUser(response.data);
         })
         .catch(() => {
-          // Token invalide, nettoyer
           logout();
         })
         .finally(() => {

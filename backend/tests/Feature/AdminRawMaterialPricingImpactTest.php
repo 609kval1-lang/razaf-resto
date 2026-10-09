@@ -3,11 +3,14 @@
 namespace Tests\Feature;
 
 use App\Models\Ingredient;
+use App\Models\CashMovement;
 use App\Models\Menu;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\RawMaterial;
+use App\Models\Supplier;
+use App\Models\SupplierPurchase;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -240,9 +243,74 @@ class AdminRawMaterialPricingImpactTest extends TestCase
 
         $response = $this->getJson('/api/admin/raw-materials');
         $response->assertOk()
-            ->assertJsonPath('0.available_portions_total', 14)
+            ->assertJsonPath('0.available_portions_total', 10)
             ->assertJsonPath('0.ingredients_count', 2)
             ->assertJsonPath('0.ingredients.0.quantity_available', 10)
             ->assertJsonPath('0.ingredients.1.quantity_available', 4);
+    }
+
+    public function test_purchase_can_update_reference_cost_without_automatically_changing_menu_price_or_money(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Sanctum::actingAs($admin);
+        $supplier = Supplier::create(['name' => 'Fournisseur farine']);
+        $material = RawMaterial::create([
+            'name' => 'Farine', 'stock' => 1, 'unit' => 'kg', 'cost' => 100,
+        ]);
+        $ingredient = Ingredient::create([
+            'raw_material_id' => $material->id, 'name' => 'Portion farine', 'portion_size' => 1,
+            'portion_unit' => 'kg', 'quantity_available' => 1, 'cost_per_portion' => 100,
+        ]);
+        $menu = Menu::create([
+            'name' => 'Crêpe', 'price' => 300, 'category' => 'main', 'is_available' => true,
+            'baseline_catalog_price' => 300, 'baseline_unit_cost' => 100, 'baseline_margin_percent' => 66.67,
+        ]);
+        $menu->ingredients()->attach($ingredient->id, ['quantity_needed' => 1]);
+
+        $this->postJson("/api/admin/suppliers/{$supplier->id}/purchases", [
+            'raw_material_id' => $material->id, 'quantity' => 2, 'unit_price' => 150,
+            'payment_mode' => 'credit', 'initial_paid_amount' => 0,
+            'due_date' => '2026-12-31', 'update_reference_cost' => true,
+        ])->assertCreated();
+
+        $this->assertSame(3.0, (float) $material->fresh()->stock);
+        $this->assertSame(150.0, (float) $material->fresh()->cost);
+        $this->assertSame(150.0, (float) $ingredient->fresh()->cost_per_portion);
+        $this->assertSame(300.0, (float) $menu->fresh()->price);
+        $this->assertSame(300.0, (float) SupplierPurchase::sum('remaining_amount'));
+        $this->assertSame(0, CashMovement::count());
+
+        $impact = collect($this->getJson('/api/admin/revenue-report')->assertOk()->json('menu_pricing_impact'))
+            ->firstWhere('menu_id', $menu->id);
+        $this->assertSame(150.0, (float) $impact['current_unit_cost']);
+        $this->assertSame(100.0, (float) $impact['current_profit_on_cost_percent']);
+
+        $this->putJson("/api/admin/menus/{$menu->id}", ['price' => 400])->assertOk();
+        $impact = collect($this->getJson('/api/admin/revenue-report')->assertOk()->json('menu_pricing_impact'))
+            ->firstWhere('menu_id', $menu->id);
+        $this->assertSame(400.0, (float) $impact['current_catalog_price']);
+        $this->assertSame(166.67, round((float) $impact['current_profit_on_cost_percent'], 2));
+
+        $this->postJson("/api/admin/suppliers/{$supplier->id}/purchases", [
+            'raw_material_id' => $material->id, 'quantity' => 1, 'unit_price' => 200,
+            'payment_mode' => 'credit', 'initial_paid_amount' => 0,
+            'due_date' => '2026-12-31', 'update_reference_cost' => false,
+        ])->assertCreated();
+        $this->assertSame(4.0, (float) $material->fresh()->stock);
+        $this->assertSame(150.0, (float) $material->fresh()->cost);
+        $this->assertSame(150.0, (float) $ingredient->fresh()->cost_per_portion);
+        $this->assertSame(500.0, (float) SupplierPurchase::sum('remaining_amount'));
+        $this->assertSame(0, CashMovement::count());
+
+        $this->postJson("/api/admin/suppliers/{$supplier->id}/purchases", [
+            'raw_material_id' => $material->id, 'quantity' => 1, 'unit_price' => 500,
+            'payment_mode' => 'cash', 'initial_paid_amount' => 500,
+            'payment_method' => 'cash', 'update_reference_cost' => true,
+        ])->assertUnprocessable();
+        $this->assertSame(2, SupplierPurchase::count());
+        $this->assertSame(4.0, (float) $material->fresh()->stock);
+        $this->assertSame(150.0, (float) $material->fresh()->cost);
+        $this->assertSame(150.0, (float) $ingredient->fresh()->cost_per_portion);
+        $this->assertSame(0, CashMovement::count());
     }
 }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getHomePathForRole } from '../utils/roleRoutes';
 import './Login.css';
+import './common/RestaurantWorkspace.css';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -49,11 +50,11 @@ const Login = () => {
   };
 
   return (
-    <div className="login-container">
+    <div className="login-container restaurant-workspace">
       <div className="login-card">
         <div className="login-header">
-          <h1>🍽️ Razafimamonjy Restaurant</h1>
-          <p>Connectez-vous pour accéder à votre espace</p>
+          <h1>Razafimamonjy Restaurant</h1>
+          <h2>Connexion</h2>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
@@ -101,13 +102,9 @@ const Login = () => {
         </form>
 
         <div className="login-footer">
-          <p>Accès selon votre rôle :</p>
           <div className="role-info">
-            <span>👨‍💼 Admin</span>
-            <span>🍽️ Serveur</span>
-            <span>🍳 Cuisine</span>
-            <span>🍹 Bar</span>
-            <span>💰 Caisse</span>
+            <span>Admin</span>
+            <span>Caisse</span>
           </div>
         </div>
       </div>

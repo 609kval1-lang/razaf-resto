@@ -1,4 +1,8 @@
 # 🏪 Razafimamonjy Restaurant - Guide d'Installation
+> Flux actif au 8 octobre 2026 : caisse unique, sans serveur, cuisine ni bar.
+> Voir [FLUX_CAISSE.md](FLUX_CAISSE.md) pour les regles actuelles.
+> Les descriptions du parcours precedent ci-dessous restent historiques.
+> Sur une base existante, ne pas relancer les seeders ou les anciennes migrations de nettoyage.
 
 ## 📋 Prérequis
 
@@ -35,14 +39,18 @@ CREATE DATABASE razaf_resto;
 EXIT;
 ```
 
-### 4️⃣ Migrations & Seed
+### 4️⃣ Migrations & Seed (base neuve uniquement)
 ```bash
-# Exécuter les migrations
+# Exécuter les migrations sur une base neuve
 php artisan migrate
 
-# Populate avec données de test
+# Peupler une base de test neuve seulement
 php artisan db:seed --class=RazafRestoSeeder
 ```
+
+Sur une base existante, sauvegarder les donnees et verifier d'abord les
+migrations en attente avec `php artisan migrate:status`. Ne pas relancer les
+seeders ni les anciennes migrations de nettoyage.
 
 ### 5️⃣ Lancer le Serveur
 ```bash
@@ -206,8 +214,12 @@ mysql -u root razaf_resto < backup_razaf.sql
 ```bash
 php artisan cache:clear
 php artisan config:clear
-php artisan migrate:refresh --seed
+php artisan migrate:status
 ```
+
+Verifier aussi que MySQL est demarre et que les parametres `DB_*` du `.env`
+correspondent a la base utilisee. `migrate:refresh --seed` recree les tables
+et ne doit pas servir au depannage d'une base existante.
 
 ### Problèmes d'authentification
 - Vérifier le `.env` DB_HOST=127.0.0.1 (pas localhost)

@@ -7,6 +7,7 @@ use App\Models\EmployeeAdvanceSettlement;
 use App\Models\EmployeePayrollTransaction;
 use App\Models\EmployeeSalaryProfile;
 use App\Models\User;
+use App\Support\Ariary;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -22,7 +23,7 @@ class EmployeePayrollService
             ]);
 
             $profile->fill([
-                'monthly_salary' => round((float) ($payload['monthly_salary'] ?? 0), 2),
+                'monthly_salary' => Ariary::requireWhole($payload['monthly_salary'] ?? 0, 'monthly_salary'),
                 'payment_day' => $payload['payment_day'] ?? null,
                 'is_active' => array_key_exists('is_active', $payload) ? (bool) $payload['is_active'] : true,
                 'notes' => $payload['notes'] ?? null,
@@ -87,7 +88,7 @@ class EmployeePayrollService
 
     public function recordAdvance(User $user, array $payload, int $actorId): EmployeePayrollTransaction
     {
-        $amount = round((float) ($payload['amount'] ?? 0), 2);
+        $amount = Ariary::requireWhole($payload['amount'] ?? 0);
         if ($amount <= 0) {
             throw ValidationException::withMessages([
                 'amount' => ['Le montant de l\'avance doit etre superieur a 0.'],
@@ -147,7 +148,7 @@ class EmployeePayrollService
         }
 
         $requestedGrossAmount = array_key_exists('gross_amount', $payload)
-            ? round((float) $payload['gross_amount'], 2)
+            ? Ariary::requireWhole($payload['gross_amount'], 'gross_amount')
             : null;
         $grossAmount = round((float) ($requestedGrossAmount ?? $profile->monthly_salary), 2);
         if ($grossAmount <= 0) {
@@ -162,7 +163,7 @@ class EmployeePayrollService
         $this->validateRemainingSalaryCoverage($user, $profile, $payrollMonth, $grossAmount);
 
         $requestedDeduction = array_key_exists('advance_deduction_amount', $payload)
-            ? round(max(0, (float) $payload['advance_deduction_amount']), 2)
+            ? Ariary::requireWhole($payload['advance_deduction_amount'], 'advance_deduction_amount')
             : null;
         $paymentMethod = (string) ($payload['payment_method'] ?? 'cash');
         $cashSourceAccount = $payload['cash_source_account'] ?? null;

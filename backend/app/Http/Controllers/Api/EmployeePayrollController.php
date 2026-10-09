@@ -89,7 +89,7 @@ class EmployeePayrollController extends Controller
     public function upsertSalaryProfile(Request $request, User $user)
     {
         $validated = $request->validate([
-            'monthly_salary' => ['required', 'numeric', 'min:0'],
+            'monthly_salary' => ['required', 'numeric', 'min:0', 'decimal:0'],
             'payment_day' => ['nullable', 'integer', 'min:1', 'max:31'],
             'is_active' => ['nullable', 'boolean'],
             'notes' => ['nullable', 'string', 'max:2000'],
@@ -106,7 +106,7 @@ class EmployeePayrollController extends Controller
     public function storeAdvance(Request $request, User $user)
     {
         $validated = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'min:1', 'decimal:0'],
             'payment_method' => ['required', Rule::in(['cash', 'mobile_money', 'transfer', 'check'])],
             'cash_source_account' => ['nullable', Rule::in(['cash', 'safe'])],
             'reference' => ['nullable', 'string', 'max:120'],
@@ -125,8 +125,8 @@ class EmployeePayrollController extends Controller
     public function storeSalaryPayment(Request $request, User $user)
     {
         $validated = $request->validate([
-            'gross_amount' => ['nullable', 'numeric', 'min:0.01'],
-            'advance_deduction_amount' => ['nullable', 'numeric', 'min:0'],
+            'gross_amount' => ['nullable', 'numeric', 'min:1', 'decimal:0'],
+            'advance_deduction_amount' => ['nullable', 'numeric', 'min:0', 'decimal:0'],
             'payroll_month' => ['nullable', 'date'],
             'payment_method' => ['required', Rule::in(['cash', 'mobile_money', 'transfer', 'check'])],
             'cash_source_account' => ['nullable', Rule::in(['cash', 'safe'])],

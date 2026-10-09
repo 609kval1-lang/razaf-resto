@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminAPI } from '../../services/api';
+import { isWholeAriary } from '../../utils/ariary';
 import DataTable from '../common/DataTable';
 
 const formatAr = (value) => {
@@ -584,7 +585,7 @@ const RevenueDashboard = () => {
       ? selectedMetricConfig.worstTitle
       : rankingView === 'best'
         ? selectedMetricConfig.bestTitle
-        : 'Top plats'
+        : 'Top ventes'
   );
 
   const unifiedRankingEmptyMessage = (
@@ -594,7 +595,7 @@ const RevenueDashboard = () => {
   );
 
   const rankingViewOptions = [
-    { value: 'top', label: 'Top plats' },
+    { value: 'top', label: 'Top ventes' },
     { value: 'best', label: selectedMetricConfig.bestTitle },
     { value: 'worst', label: selectedMetricConfig.worstTitle },
   ];
@@ -656,6 +657,11 @@ const RevenueDashboard = () => {
       return;
     }
 
+    if (!isWholeAriary(priceEditValue) || Number(priceEditValue) < 0) {
+      setMessage('Erreur: saisissez un prix entier en Ariary, sans decimales.');
+      return;
+    }
+
     setSavingPriceUpdate(true);
 
     try {
@@ -672,6 +678,14 @@ const RevenueDashboard = () => {
       setSavingPriceUpdate(false);
     }
   };
+
+  const projectedPrice = isWholeAriary(priceEditValue) && Number(priceEditValue) >= 0
+    ? Number(priceEditValue)
+    : null;
+  const projectedUnitCost = Number(editingPriceRow?.current_unit_cost || 0);
+  const projectedProfitOnCost = projectedPrice !== null && projectedUnitCost > 0
+    ? ((projectedPrice - projectedUnitCost) / projectedUnitCost) * 100
+    : null;
 
   const menuPricingImpactColumns = [
     {
@@ -764,7 +778,7 @@ const RevenueDashboard = () => {
       <div className="card revenue-dashboard-shell">
         <div className="revenue-dashboard-header">
           <div>
-            <h2>💰 Administration des Recettes</h2>
+            <h2>Administration des Recettes</h2>
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => loadReport()}>
             Actualiser
@@ -808,7 +822,7 @@ const RevenueDashboard = () => {
 
       <div className="card">
         <div className="revenue-dashboard-section-header">
-          <h3>📦 Détail du classement · {unifiedRankingTitle}{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
+          <h3>Détail du classement · {unifiedRankingTitle}{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
           <div className="revenue-dashboard-section-actions">
             <div className="form-hint revenue-dashboard-section-meta">
               Vue: <strong>{report?.filters?.scope_label || scopeLabel(scope)}</strong> · Utilisateur: <strong>{selectedUserLabel}</strong> · Intervalle analysé: du <strong>{formatDateTime(report?.filters?.from)}</strong> au <strong>{formatDateTime(report?.filters?.to)}</strong>
@@ -818,7 +832,6 @@ const RevenueDashboard = () => {
               className={`btn btn-sm ${showRankingFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
               onClick={() => setShowRankingFilters((previous) => !previous)}
             >
-              <span aria-hidden="true">{showRankingFilters ? '▾' : '▸'}</span>
               <span>{showRankingFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
               {activeRankingFilterCount > 0 ? <strong>{activeRankingFilterCount}</strong> : null}
             </button>
@@ -950,7 +963,7 @@ const RevenueDashboard = () => {
       </div>
 
       <div className="card">
-        <h3>🎯 Impact coûts menus et décision de prix{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
+        <h3>Impact coûts menus et décision de prix{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
         <div className="pricing-insights-grid">
           <div className="pricing-insight-card danger">
             <span>Hausse proposée</span>
@@ -1018,6 +1031,12 @@ const RevenueDashboard = () => {
                   required
                 />
               </div>
+
+              <div className="admin-pricing-preview" aria-live="polite">
+                <span>Bénéfice / coût au prix choisi</span>
+                <strong>{projectedProfitOnCost === null ? 'Non calculable' : `${projectedProfitOnCost.toFixed(1)}%`}</strong>
+              </div>
+              <p className="form-hint">Le nouveau prix s'applique aux prochaines commandes uniquement.</p>
 
               <div className="form-actions">
                 <button

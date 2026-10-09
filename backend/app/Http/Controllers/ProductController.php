@@ -8,30 +8,20 @@ use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index()
     {
         $products = Product::with(['category', 'ingredients', 'preparationSteps', 'parentProduct', 'recipes'])->get();
         return response()->json($products);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
     public function create()
     {
         $categories = Category::all();
         return response()->json($categories);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
-        // Vérifier que l'utilisateur est autorisé à créer un produit
         $this->authorize('create', Product::class);
 
         $validated = $request->validate([
@@ -51,9 +41,6 @@ class ProductController extends Controller
         ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(Product $product)
     {
         return response()->json(
@@ -67,9 +54,6 @@ class ProductController extends Controller
         );
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
     public function edit(Product $product)
     {
         $categories = Category::all();
@@ -79,9 +63,6 @@ class ProductController extends Controller
         ]);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
 public function update(Request $request, Product $product)
 {
     $this->authorize('update', $product);
@@ -104,12 +85,8 @@ public function update(Request $request, Product $product)
 }
 
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(Product $product)
     {
-        // Vérifier que l'utilisateur est autorisé à supprimer ce produit
         $this->authorize('delete', $product);
 
         $product->delete();

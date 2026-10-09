@@ -39,20 +39,6 @@ const normalizeEditableStatus = (status) => {
   return normalized === 'reserved' ? 'reserved' : 'free';
 };
 
-const normalizeSection = (section) => {
-  const normalized = String(section || '').toLowerCase().trim();
-
-  if (['bar', 'barre'].includes(normalized)) {
-    return 'bar';
-  }
-
-  if (['salle', 'main', 'interieur', 'intérieur'].includes(normalized)) {
-    return 'salle';
-  }
-
-  return 'salle';
-};
-
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
 const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
 const DATE_INPUT_PATTERN = /^(\d{2})\/(\d{2})\/(\d{4})$/;
@@ -190,7 +176,6 @@ const TableManagement = () => {
     table_number: '',
     capacity: 4,
     status: 'free',
-    section: 'salle',
     reservation_name: '',
     reservation_phone: '',
     reservation_date: '',
@@ -239,7 +224,6 @@ const TableManagement = () => {
       table_number: Number(formData.table_number),
       capacity: Number(formData.capacity),
       status: normalizeStatus(formData.status),
-      section: normalizeSection(formData.section),
       reservation_name: formData.reservation_name ? String(formData.reservation_name).trim() : null,
       reservation_phone: formData.reservation_phone ? String(formData.reservation_phone).trim() : null,
       reservation_at: reservationAt,
@@ -251,7 +235,6 @@ const TableManagement = () => {
         await adminAPI.updateTable(editingTable.id, {
           capacity: payload.capacity,
           status: payload.status,
-          section: payload.section,
           reservation_name: payload.reservation_name,
           reservation_phone: payload.reservation_phone,
           reservation_at: payload.reservation_at,
@@ -278,7 +261,6 @@ const TableManagement = () => {
       table_number: table.table_number,
       capacity: table.capacity,
       status: normalizeEditableStatus(table.recorded_status || table.status),
-      section: normalizeSection(table.section || table.location),
       reservation_name: table.reservation_name || '',
       reservation_phone: table.reservation_phone || '',
       reservation_date: reservationFields.reservation_date,
@@ -313,7 +295,6 @@ const TableManagement = () => {
       table_number: '',
       capacity: 4,
       status: 'free',
-      section: 'salle',
       reservation_name: '',
       reservation_phone: '',
       reservation_date: '',
@@ -356,7 +337,7 @@ const TableManagement = () => {
     const configuredStatus = normalizeStatus(table?.recorded_status || table?.status);
 
     if (configuredStatus === 'free' && table?.has_active_orders) {
-      return 'Libre (occupée côté service)';
+      return 'Commande en cours';
     }
 
     const labels = {
@@ -371,23 +352,14 @@ const TableManagement = () => {
   const getServiceStatusLabel = (table) => {
     const serviceStatus = getServiceStatus(table);
     const labels = {
-      free: 'Disponible serveur',
+      free: 'Disponible',
       occupied: 'Occupée (commande impayée)',
       reserved: 'Réservée (T-2h)',
     };
 
-    const baseLabel = labels[serviceStatus] || 'Disponible serveur';
+    const baseLabel = labels[serviceStatus] || 'Disponible';
     const reason = String(table?.server_block_reason || '').trim();
     return reason ? `${baseLabel} · ${reason}` : baseLabel;
-  };
-
-  const getSectionLabel = (section) => {
-    const normalized = normalizeSection(section);
-    const labels = {
-      bar: 'Bar',
-      salle: 'Salle',
-    };
-    return labels[normalized] || 'Salle';
   };
 
   const tableColumns = [
@@ -408,13 +380,6 @@ const TableManagement = () => {
       render: (table) => `${table.capacity} personnes`,
     },
     {
-      key: 'section',
-      header: 'Emplacement',
-      sortAccessor: (table) => getSectionLabel(table.section || table.location),
-      searchAccessor: (table) => getSectionLabel(table.section || table.location),
-      render: (table) => getSectionLabel(table.section || table.location),
-    },
-    {
       key: 'status',
       header: 'Statut admin',
       sortAccessor: (table) => getStatusLabel(table),
@@ -427,7 +392,7 @@ const TableManagement = () => {
     },
     {
       key: 'service_status',
-      header: 'Statut serveur',
+      header: 'Disponibilite',
       sortAccessor: (table) => getServiceStatusLabel(table),
       searchAccessor: (table) => `${getServiceStatusLabel(table)} ${table?.server_block_reason || ''}`,
       render: (table) => (
@@ -448,14 +413,14 @@ const TableManagement = () => {
         }
 
         return (
-          <div style={{ fontSize: '0.82rem' }}>
+          <div className="reservation-list-card">
             <strong>{table.reservation_name || 'Client non renseigné'}</strong>
-            <div>{formatReservationDate(table.reservation_at)}</div>
-            <div style={{ color: '#666' }}>
+            <time>{formatReservationDate(table.reservation_at)}</time>
+            <small>
               {table.reservation_locked
                 ? 'Bloquée maintenant (fenêtre T-2h atteinte)'
                 : `Bloquée à partir de ${formatReservationDate(table.reservation_lock_at)}`}
-            </div>
+            </small>
           </div>
         );
       },
@@ -471,13 +436,13 @@ const TableManagement = () => {
             className="btn btn-secondary btn-sm"
             onClick={() => handleEdit(table)}
           >
-            ✏️
+            Modifier
           </button>
           <button
             className="btn btn-danger btn-sm"
             onClick={() => requestDelete(table)}
           >
-            🗑️
+            Supprimer
           </button>
         </div>
       ),
@@ -500,9 +465,9 @@ const TableManagement = () => {
 
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>🍽️ Gestion des Tables</h2>
+          <h2>Gestion des Tables</h2>
           <button className="btn btn-primary" onClick={openCreateModal}>
-            ➕ Ajouter Table
+            Ajouter Table
           </button>
         </div>
 
@@ -510,25 +475,25 @@ const TableManagement = () => {
           columns={tableColumns}
           data={tables}
           rowKey="id"
-          searchPlaceholder="Rechercher une table (numéro, section, statut, réservation)..."
+          searchPlaceholder="Rechercher une table (numéro, statut, réservation)..."
           initialSort={{ key: 'table_number', direction: 'asc' }}
           emptyMessage="Aucune table configurée."
         />
       </div>
 
-      {/* Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="table-form-title" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{editingTable ? 'Modifier Table' : 'Créer Table'}</h3>
+              <h3 id="table-form-title">{editingTable ? 'Modifier Table' : 'Créer Table'}</h3>
               <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             </div>
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} aria-label="Table">
               <div className="form-group">
-                <label>Numéro de table</label>
+                <label htmlFor="table-number">Numéro de table</label>
                 <input
+                  id="table-number"
                   type="number"
                   value={formData.table_number}
                   onChange={(e) => setFormData({...formData, table_number: e.target.value})}
@@ -538,8 +503,9 @@ const TableManagement = () => {
               </div>
 
               <div className="form-group">
-                <label>Capacité (personnes)</label>
+                <label htmlFor="table-capacity">Capacité (personnes)</label>
                 <input
+                  id="table-capacity"
                   type="number"
                   value={formData.capacity}
                   onChange={(e) => setFormData({...formData, capacity: e.target.value})}
@@ -550,20 +516,9 @@ const TableManagement = () => {
               </div>
 
               <div className="form-group">
-                <label>Emplacement</label>
+                <label htmlFor="table-status">Statut</label>
                 <select
-                  value={formData.section}
-                  onChange={(e) => setFormData({...formData, section: e.target.value})}
-                  required
-                >
-                  <option value="salle">🏠 Salle</option>
-                  <option value="bar">🍸 Bar</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Statut</label>
-                <select
+                  id="table-status"
                   value={formData.status}
                   onChange={(e) => {
                     const nextStatus = e.target.value;
@@ -585,12 +540,9 @@ const TableManagement = () => {
                   }}
                   required
                 >
-                  <option value="free">✅ Libre</option>
-                  <option value="reserved">📅 Réservée</option>
+                  <option value="free">Libre</option>
+                  <option value="reserved">Réservée</option>
                 </select>
-                <span className="form-hint">
-                  Le statut "Occupée" est automatique quand une commande est active et non payée.
-                </span>
               </div>
 
               {formData.status === 'reserved' && (
@@ -621,6 +573,7 @@ const TableManagement = () => {
                       <input
                         type="text"
                         inputMode="numeric"
+                        aria-label="Date de reservation"
                         placeholder="JJ/MM/AAAA"
                         value={formData.reservation_date}
                         onChange={(e) => setFormData({ ...formData, reservation_date: normalizeDateInput(e.target.value) })}
@@ -628,6 +581,7 @@ const TableManagement = () => {
                         required
                       />
                       <select
+                        aria-label="Heure de reservation"
                         value={formData.reservation_hour}
                         onChange={(e) => setFormData({ ...formData, reservation_hour: e.target.value })}
                         required
@@ -638,6 +592,7 @@ const TableManagement = () => {
                       </select>
                       <span className="reservation-time-separator">:</span>
                       <select
+                        aria-label="Minute de reservation"
                         value={formData.reservation_minute}
                         onChange={(e) => setFormData({ ...formData, reservation_minute: e.target.value })}
                         required
@@ -647,7 +602,6 @@ const TableManagement = () => {
                         ))}
                       </select>
                     </div>
-                    <span className="form-hint">Format: JJ/MM/AAAA (ex: 26/03/2026 à 19:30)</span>
                   </div>
 
                   <div className="form-group">
@@ -656,7 +610,7 @@ const TableManagement = () => {
                       rows="2"
                       value={formData.reservation_notes}
                       onChange={(e) => setFormData({ ...formData, reservation_notes: e.target.value })}
-                      placeholder="Ex: anniversaire, table terrasse..."
+                      placeholder="Note"
                     />
                   </div>
                 </>

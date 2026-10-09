@@ -1,0 +1,38 @@
+.restaurant-workspace .cp-payment-panel { background: transparent; border: 0; padding: 0; box-shadow: none; }
+.cp-payment-panel > .staff-card-header { margin-bottom: 18px; }
+.restaurant-workspace .cp-payment-card { display: grid; gap: 20px; background: #fffefa; border: 1px solid #d6e1d1; border-radius: 16px; padding: 22px; }
+.cp-payment-card > header { grid-column: 1 / -1; grid-row: 1; border-bottom: 1px solid #dfe6dc; padding-bottom: 18px; align-items: start; }
+.restaurant-workspace .cp-ticket-heading > strong { font: 500 1.6rem Georgia, serif; letter-spacing: -0.025em; }
+.restaurant-workspace .cp-ticket-heading .cp-ticket-location { font-size: 0.68rem; color: #256249; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; }
+.cp-ticket-details { display: flex; flex-wrap: wrap; gap: 6px 18px; color: #65756c; font-size: 0.76rem; margin-top: 8px; }
+.cp-ticket-status { display: grid; justify-items: end; gap: 8px; font-size: 0.68rem; color: #65756c; }
+.cp-order-recap { background: #f3f6ee; border: 1px solid #dfe6dc; border-radius: 12px; padding: 18px; align-self: start; }
+.restaurant-workspace .cp-order-recap h3 { margin: 0 0 8px; font-size: 0.82rem; }
+.cp-recap-line { display: flex; gap: 16px; align-items: start; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid #dfe6dc; font-size: 0.78rem; }
+.cp-recap-line > div { display: grid; gap: 6px; }
+.cp-recap-line span { color: #65756c; font-size: 0.68rem; }
+.cp-recap-line > strong { white-space: nowrap; }
+.cp-recap-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 18px; font-size: 0.76rem; }
+.cp-recap-total strong { font-size: 1rem; color: #256249; }
+.restaurant-workspace .cp-payment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-content: start; }
+.restaurant-workspace .cp-payment-grid label { font-size: 0.73rem; color: #65756c; font-weight: 700; gap: 8px; }
+.restaurant-workspace .cp-payment-grid .cp-amount-field { grid-column: 1 / -1; color: #256249; }
+.restaurant-workspace .cp-amount-field input { background: #edf4ed; border-color: #c9dbbf; font: 800 1.75rem 'Manrope', sans-serif; padding: 12px 16px; color: #233c33; }
+.restaurant-workspace .cp-payment-card footer { grid-column: 1 / -1; border-top: 1px solid #dfe6dc; padding-top: 18px; margin: 0; }
+.cp-payment-card footer .staff-inline-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: end; }
+.cp-payment-card footer .staff-btn { min-height: 44px; padding: 12px 18px; }
+@media (min-width: 1000px) {
+  .cp-payment-card.has-recap { grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.35fr); column-gap: 28px; }
+  .cp-payment-card.has-recap .cp-order-recap { grid-column: 1; grid-row: 2 / 4; }
+  .cp-payment-card.has-recap .cp-payment-grid { grid-column: 2; grid-row: 2; }
+  .cp-payment-card.has-recap footer { grid-column: 2; grid-row: 3; }
+}
+@media (max-width: 600px) {
+  .restaurant-workspace .cp-payment-card { padding: 14px; gap: 16px; }
+  .cp-payment-card > header { flex-direction: column; gap: 14px; }
+  .cp-ticket-status { justify-items: start; }
+  .cp-order-recap { padding: 14px; }
+  .restaurant-workspace .cp-payment-grid { grid-template-columns: minmax(0, 1fr); }
+  .cp-payment-card footer .staff-inline-actions { flex-direction: column; width: 100%; }
+  .cp-payment-card footer .staff-btn { width: 100%; }
+}

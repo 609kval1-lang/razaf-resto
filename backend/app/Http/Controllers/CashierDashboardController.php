@@ -7,9 +7,6 @@ use Illuminate\Http\Request;
 
 class CashierDashboardController extends Controller
 {
-    /**
-     * Get orders ready for payment (served status)
-     */
     public function index(Request $request)
     {
         $this->authorize('viewAny', Order::class);
@@ -23,9 +20,6 @@ class CashierDashboardController extends Controller
         return response()->json($orders);
     }
 
-    /**
-     * Mark order as served (after payment)
-     */
     public function markServed(Request $request, Order $order)
     {
         $this->authorize('changeStatus', $order);
@@ -47,9 +41,6 @@ class CashierDashboardController extends Controller
         ]);
     }
 
-    /**
-     * Get payment summary
-     */
     public function paymentSummary(Request $request)
     {
         $from = $request->query('from') ? now()->parse($request->query('from')) : now()->startOfDay();
