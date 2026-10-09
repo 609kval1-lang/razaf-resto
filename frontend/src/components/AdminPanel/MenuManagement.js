@@ -494,15 +494,6 @@ const MenuManagement = () => {
     }, 0);
   };
 
-  const calculateMargin = () => {
-    const cost = parseFloat(calculateTotalCost());
-    const price = parseFloat(formData.price);
-    if (cost > 0 && price > 0) {
-      return (((price - cost) / cost) * 100).toFixed(1);
-    }
-    return '0.0';
-  };
-
   const getMenuIngredientItems = (menu) => {
     if (!Array.isArray(menu?.ingredients)) {
       return [];
@@ -558,6 +549,11 @@ const MenuManagement = () => {
   const currentPreviewImage = resolveApiAssetUrl(
     String(imagePreviewUrl || '').trim() || String(formData.image_url || '').trim()
   ) || getSuggestedMenuImageUrl(formData, '640x420');
+  const estimatedRecipeCost = calculateTotalCost();
+  const validSalePrice = isWholeAriary(formData.price) && Number(formData.price) >= 0;
+  const estimatedProfitOnCost = estimatedRecipeCost > 0 && validSalePrice
+    ? (((Number(formData.price) - estimatedRecipeCost) / estimatedRecipeCost) * 100).toFixed(1)
+    : null;
 
   const menuColumns = [
     {
@@ -732,28 +728,6 @@ const MenuManagement = () => {
                 />
               </div>
 
-              <div className="form-group">
-                <label>Image du plat (fichier local)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleLocalImageChange}
-                />
-                <div className="image-helper-row">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={removeSelectedImage}>
-                    Retirer l'image
-                  </button>
-                  {selectedImageFile ? <span className="form-hint">{selectedImageFile.name}</span> : null}
-                </div>
-                <div className="menu-image-preview-wrap">
-                  <img
-                    src={currentPreviewImage}
-                    alt={formData.name || 'Aperçu menu'}
-                    className="menu-image-preview"
-                  />
-                </div>
-              </div>
-
               <div className="form-row">
                 <div className="form-group">
                   <label htmlFor="admin-menu-price">Prix de vente (Ar)</label>
@@ -778,6 +752,35 @@ const MenuManagement = () => {
                     <option value={true}>Disponible</option>
                     <option value={false}>Indisponible</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="menu-pricing-preview" aria-live="polite">
+                <div><span>Coût de la recette</span><strong>{selectedIngredients.length > 0 ? formatAr(estimatedRecipeCost) : 'À définir'}</strong></div>
+                <div><span>Prix saisi</span><strong>{validSalePrice ? formatAr(formData.price) : 'Prix invalide'}</strong></div>
+                <div><span>Marge sur coût</span><strong className={Number(estimatedProfitOnCost) < 0 ? 'is-negative' : ''}>{estimatedProfitOnCost === null ? 'Non calculable' : `${estimatedProfitOnCost} %`}</strong></div>
+              </div>
+              <p className="form-hint menu-pricing-hint">Bénéfice / coût = (prix de vente - coût des ingrédients) / coût des ingrédients. Une valeur négative signale une vente à perte estimée.</p>
+
+              <div className="form-group">
+                <label>Image du menu (fichier local)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleLocalImageChange}
+                />
+                <div className="image-helper-row">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={removeSelectedImage}>
+                    Retirer l'image
+                  </button>
+                  {selectedImageFile ? <span className="form-hint">{selectedImageFile.name}</span> : null}
+                </div>
+                <div className="menu-image-preview-wrap">
+                  <img
+                    src={currentPreviewImage}
+                    alt={formData.name || 'Aperçu menu'}
+                    className="menu-image-preview"
+                  />
                 </div>
               </div>
 
@@ -881,13 +884,6 @@ const MenuManagement = () => {
                   );
                 })}
               </div>
-
-              {selectedIngredients.length > 0 && (
-                <div className="cost-summary">
-                  <div>Coût total des ingrédients: <strong>{formatAr(calculateTotalCost())}</strong></div>
-                  <div>Marge bénéficiaire: <strong>{calculateMargin()} %</strong></div>
-                </div>
-              )}
 
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>

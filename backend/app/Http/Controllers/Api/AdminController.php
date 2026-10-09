@@ -12,6 +12,7 @@ use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Supplier;
 use App\Services\InventoryService;
+use App\Services\SalesBreakdownService;
 use App\Services\OrderStockService;
 use App\Services\SupplierProcurementService;
 use App\Support\Ariary;
@@ -1127,6 +1128,8 @@ class AdminController extends Controller
         $packagingRevenueGross = 0.0;
         $packagingRevenueNet = 0.0;
         $packagingByOrderId = [];
+        $salesBreakdownService = app(SalesBreakdownService::class);
+        $familyRevenueNet = ['dishes' => 0.0, 'drinks' => 0.0];
 
         if ($supportsPackagingPricingFields && $orderIds->isNotEmpty()) {
             $packagingRows = DB::table('orders')
@@ -1170,6 +1173,7 @@ class AdminController extends Controller
             $itemGrossAllocations += $grossAllocations;
             $itemNetAllocations += $netAllocations;
         }
+        $familyRevenueNet['dishes'] = $packagingRevenueNet;
 
         $menus = Menu::query()
             ->with([
@@ -1200,10 +1204,13 @@ class AdminController extends Controller
                 'menu_id' => (int) $menu->id,
                 'menu_name' => (string) $menu->name,
                 'menu_category' => (string) ($menu->category ?: 'autres'),
+                'menu_family' => $salesBreakdownService->familyForMenu((string) $menu->category, (string) $menu->name),
                 'current_catalog_price' => Ariary::round($menu->price ?? 0),
                 'unit_estimated_cost' => round($menuUnitCost, 2),
                 'total_quantity' => 0,
                 'total_revenue' => 0,
+                'total_revenue_net' => 0,
+                'total_discount' => 0,
                 'total_cost' => 0,
                 'total_profit' => 0,
             ];
@@ -1220,10 +1227,17 @@ class AdminController extends Controller
                     'menu_id' => $menuId,
                     'menu_name' => $item->menu?->name ? (string) $item->menu->name : "Menu #{$menuId}",
                     'menu_category' => $item->menu?->category ? (string) $item->menu->category : 'autres',
+                    'menu_family' => $salesBreakdownService->familyForMenu(
+                        (string) ($item->menu?->category ?? ''),
+                        (string) ($item->menu?->name ?? ''),
+                        (string) ($item->station ?? '')
+                    ),
                     'current_catalog_price' => Ariary::round($item->menu?->price ?? $item->price_at_order ?? 0),
                     'unit_estimated_cost' => 0.0,
                     'total_quantity' => 0,
                     'total_revenue' => 0,
+                    'total_revenue_net' => 0,
+                    'total_discount' => 0,
                     'total_cost' => 0,
                     'total_profit' => 0,
                 ];
@@ -1232,6 +1246,7 @@ class AdminController extends Controller
             $quantity = (int) ($item->quantity ?? 0);
             $lineRevenue = (float) ($itemGrossAllocations[$item->id] ?? 0);
             $lineNetRevenue = (float) ($itemNetAllocations[$item->id] ?? 0);
+            $familyRevenueNet[$menuStatsMap[$menuId]['menu_family']] += $lineNetRevenue;
             $orderGross = (float) ($orderGrossTotals[$item->order_id] ?? 0);
             // This report follows collections; split payments must not repeat the full cost each day.
             $costRatio = $orderGross > 0
@@ -1241,6 +1256,8 @@ class AdminController extends Controller
 
             $menuStatsMap[$menuId]['total_quantity'] += $quantity;
             $menuStatsMap[$menuId]['total_revenue'] += $lineRevenue;
+            $menuStatsMap[$menuId]['total_revenue_net'] += $lineNetRevenue;
+            $menuStatsMap[$menuId]['total_discount'] += $lineRevenue - $lineNetRevenue;
             $menuStatsMap[$menuId]['total_cost'] += $lineCost;
             $menuStatsMap[$menuId]['total_profit'] += ($lineNetRevenue - $lineCost);
         }
@@ -1255,10 +1272,13 @@ class AdminController extends Controller
                     'menu_id' => $row['menu_id'],
                     'menu_name' => $row['menu_name'],
                     'menu_category' => $row['menu_category'] ?? 'autres',
+                    'menu_family' => $row['menu_family'] ?? 'dishes',
                     'current_catalog_price' => Ariary::round($row['current_catalog_price'] ?? 0),
                     'unit_estimated_cost' => round((float) ($row['unit_estimated_cost'] ?? 0), 2),
                     'total_quantity' => (int) $row['total_quantity'],
                     'total_revenue' => Ariary::round($row['total_revenue']),
+                    'total_revenue_net' => Ariary::round($row['total_revenue_net']),
+                    'total_discount' => Ariary::round($row['total_discount']),
                     'total_cost' => round((float) $row['total_cost'], 2),
                     'total_profit' => round((float) $row['total_profit'], 2),
                     'margin_percent' => round((float) $profitOnCostPercent, 1),
@@ -1281,6 +1301,8 @@ class AdminController extends Controller
                 'lowest_margin' => [],
                 'highest_revenue' => [],
                 'lowest_revenue' => [],
+                'highest_net_revenue' => [],
+                'lowest_net_revenue' => [],
             ]
             : [
                 'most_demanded' => $this->selectRankedMenusByCategory($soldMenuStats, 'total_quantity', 'desc', $topLimit),
@@ -1291,13 +1313,12 @@ class AdminController extends Controller
                 'lowest_margin' => $this->selectRankedMenusByCategory($soldMenuStats, 'margin_percent', 'asc', $topLimit),
                 'highest_revenue' => $this->selectRankedMenusByCategory($soldMenuStats, 'total_revenue', 'desc', $topLimit),
                 'lowest_revenue' => $this->selectRankedMenusByCategory($soldMenuStats, 'total_revenue', 'asc', $topLimit),
+                'highest_net_revenue' => $this->selectRankedMenusByCategory($soldMenuStats, 'total_revenue_net', 'desc', $topLimit),
+                'lowest_net_revenue' => $this->selectRankedMenusByCategory($soldMenuStats, 'total_revenue_net', 'asc', $topLimit),
             ];
 
         $categorySummary = $menuStats
-            ->groupBy(function ($row) {
-                $category = trim((string) ($row['menu_category'] ?? 'autres'));
-                return $category !== '' ? $category : 'autres';
-            })
+            ->groupBy(fn ($row) => $row['menu_family'] ?? 'dishes')
             ->map(function (Collection $group, string $category) {
                 return [
                     'category' => $category,
@@ -1305,6 +1326,8 @@ class AdminController extends Controller
                     'menus_sold_count' => (int) $group->filter(fn ($row) => (int) ($row['total_quantity'] ?? 0) > 0)->count(),
                     'total_quantity' => (int) $group->sum('total_quantity'),
                     'total_revenue' => Ariary::round($group->sum('total_revenue')),
+                    'total_revenue_net' => Ariary::round($group->sum('total_revenue_net')),
+                    'total_discount' => Ariary::round($group->sum('total_discount')),
                     'total_cost' => round((float) $group->sum('total_cost'), 2),
                     'total_profit' => round((float) $group->sum('total_profit'), 2),
                 ];
@@ -1316,6 +1339,7 @@ class AdminController extends Controller
         $menuPricingImpact = $this->buildMenuPricingImpact($menus->values(), $menuStats);
 
         $totalRevenueGross = $totalRevenueNet + $totalDiscount;
+        $familyRevenueNet['dishes'] += $totalRevenueNet - array_sum($familyRevenueNet);
         $totalEstimatedCost = (float) $menuStats->sum('total_cost');
         $totalEstimatedProfit = $totalRevenueNet - $totalEstimatedCost;
 
@@ -1341,6 +1365,8 @@ class AdminController extends Controller
                 'packaging_quantity_total' => (int) $packagingQuantityTotal,
                 'packaging_revenue_gross' => Ariary::round($packagingRevenueGross),
                 'packaging_revenue_net' => Ariary::round($packagingRevenueNet),
+                'dishes_revenue_net' => Ariary::round($familyRevenueNet['dishes']),
+                'drinks_revenue_net' => Ariary::round($familyRevenueNet['drinks']),
             ],
             'category_summary' => $categorySummary,
             'menu_stats' => $menuStats->all(),
@@ -1392,10 +1418,7 @@ class AdminController extends Controller
         $normalizedDirection = strtolower($direction) === 'asc' ? 'asc' : 'desc';
 
         return $menuStats
-            ->groupBy(function ($row) {
-                $category = trim((string) ($row['menu_category'] ?? 'autres'));
-                return $category !== '' ? $category : 'autres';
-            })
+            ->groupBy(fn ($row) => $row['menu_family'] ?? 'dishes')
             ->flatMap(function (Collection $group, string $category) use ($metric, $limitPerCategory, $normalizedDirection) {
                 $sorted = $group
                     ->sort(function (array $left, array $right) use ($metric, $normalizedDirection) {
@@ -1577,6 +1600,7 @@ class AdminController extends Controller
                 'menu_id' => $menuId,
                 'menu_name' => (string) ($menu->name ?? "Menu #{$menuId}"),
                 'menu_category' => (string) ($menuStat['menu_category'] ?? ($menu->category ?? 'autres')),
+                'menu_family' => (string) ($menuStat['menu_family'] ?? 'dishes'),
                 'current_catalog_price' => $catalogPrice,
                 'suggested_catalog_price' => $suggestedCatalogPrice,
                 'baseline_unit_cost' => $baselineUnitCost,

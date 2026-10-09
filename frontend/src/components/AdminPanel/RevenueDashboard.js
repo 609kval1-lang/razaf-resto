@@ -66,38 +66,14 @@ const scopeLabel = (scope) => {
 };
 
 const CATEGORY_META = {
-  entree: { label: 'Entrées', order: 10 },
-  main: { label: 'Plats principaux', order: 20 },
-  snack: { label: 'Snacks', order: 30 },
-  side: { label: 'Accompagnements', order: 40 },
-  dessert: { label: 'Desserts', order: 50 },
-  drink: { label: 'Boissons', order: 60 },
-  cocktail: { label: 'Cocktails', order: 65 },
-  autres: { label: 'Autres', order: 999 },
+  dishes: { label: 'Plats', order: 10 },
+  drinks: { label: 'Boissons', order: 20 },
 };
 
-const CATEGORY_ALIAS = {
-  starter: 'entree',
-  entree: 'entree',
-  'entrée': 'entree',
-  entrees: 'entree',
-  'entrées': 'entree',
-  main: 'main',
-  plat: 'main',
-  plats: 'main',
-  snack: 'snack',
-  side: 'side',
-  accompagnement: 'side',
-  accompagnements: 'side',
-  dessert: 'dessert',
-  desserts: 'dessert',
-  drink: 'drink',
-  drinks: 'drink',
-  cocktail: 'cocktail',
-  cocktails: 'cocktail',
-  boisson: 'drink',
-  boissons: 'drink',
-};
+const DRINK_CATEGORIES = new Set([
+  'drinks', 'drink', 'boisson', 'boissons', 'cocktail', 'cocktails',
+  'mocktail', 'mocktails', 'bar', 'beverage', 'beverages',
+]);
 
 const normalizeCategory = (value) => String(value || '')
   .toLowerCase()
@@ -107,8 +83,8 @@ const normalizeCategory = (value) => String(value || '')
 
 const getCategoryMeta = (rawCategory) => {
   const normalized = normalizeCategory(rawCategory);
-  const categoryKey = CATEGORY_ALIAS[normalized] || normalized || 'autres';
-  const meta = CATEGORY_META[categoryKey] || CATEGORY_META.autres;
+  const categoryKey = DRINK_CATEGORIES.has(normalized) ? 'drinks' : 'dishes';
+  const meta = CATEGORY_META[categoryKey];
 
   return {
     key: categoryKey,
@@ -149,18 +125,18 @@ const rankingMetricConfig = {
     worstTitle: 'Moins rentables',
   },
   margin: {
-    label: 'Benefice / cout (%)',
+    label: 'Bénéfice / coût (%)',
     bestKey: 'highest_margin',
     worstKey: 'lowest_margin',
     bestTitle: 'Plus fort benefice / cout',
     worstTitle: 'Plus faible benefice / cout',
   },
   revenue: {
-    label: 'Recette brute',
-    bestKey: 'highest_revenue',
-    worstKey: 'lowest_revenue',
-    bestTitle: 'Plus générateurs de recette',
-    worstTitle: 'Moins générateurs de recette',
+    label: 'Recette nette',
+    bestKey: 'highest_net_revenue',
+    worstKey: 'lowest_net_revenue',
+    bestTitle: 'Plus fortes recettes nettes',
+    worstTitle: 'Plus faibles recettes nettes',
   },
 };
 
@@ -179,7 +155,7 @@ const defaultReport = {
 
 const normalizeRankingRows = (rows) => {
   return rows.map((row) => {
-    const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_category);
+    const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_family || row?.menu_category);
     return {
       ...row,
       category_key: categoryMeta.key,
@@ -198,7 +174,8 @@ const RevenueDashboard = () => {
   const [rankingMetric, setRankingMetric] = useState('demand');
   const [rankingView, setRankingView] = useState('top');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [showRankingFilters, setShowRankingFilters] = useState(false);
+  const [impactCategory, setImpactCategory] = useState('all');
+  const [impactAction, setImpactAction] = useState('all');
   const [report, setReport] = useState(defaultReport);
   const [editingPriceRow, setEditingPriceRow] = useState(null);
   const [priceEditValue, setPriceEditValue] = useState('');
@@ -299,6 +276,8 @@ const RevenueDashboard = () => {
       lowest_margin: Array.isArray(baseRankings.lowest_margin) ? baseRankings.lowest_margin : [],
       highest_revenue: Array.isArray(baseRankings.highest_revenue) ? baseRankings.highest_revenue : (Array.isArray(report?.top_grossing) ? report.top_grossing : []),
       lowest_revenue: Array.isArray(baseRankings.lowest_revenue) ? baseRankings.lowest_revenue : [],
+      highest_net_revenue: Array.isArray(baseRankings.highest_net_revenue) ? baseRankings.highest_net_revenue : [],
+      lowest_net_revenue: Array.isArray(baseRankings.lowest_net_revenue) ? baseRankings.lowest_net_revenue : [],
     };
   }, [report]);
 
@@ -341,7 +320,7 @@ const RevenueDashboard = () => {
     const map = new Map();
 
     allRankingRows.forEach((row) => {
-      const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_category);
+      const categoryMeta = getCategoryMeta(row?.rank_category || row?.menu_family || row?.menu_category);
       map.set(categoryMeta.key, categoryMeta);
     });
 
@@ -351,7 +330,7 @@ const RevenueDashboard = () => {
     });
 
     menuPricingImpact.forEach((entry) => {
-      const categoryMeta = getCategoryMeta(entry?.menu_category);
+      const categoryMeta = getCategoryMeta(entry?.menu_family || entry?.menu_category);
       map.set(categoryMeta.key, categoryMeta);
     });
 
@@ -404,46 +383,21 @@ const RevenueDashboard = () => {
     return categoryTopRows;
   }, [rankingView, categoryTopRows, bestRows, worstRows]);
 
-  const categoryFilterSourceRows = useMemo(() => {
-    if (rankingView === 'worst') {
-      return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.worstKey]) ? rankings[selectedMetricConfig.worstKey] : []);
-    }
-
-    if (rankingView === 'best') {
-      return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.bestKey]) ? rankings[selectedMetricConfig.bestKey] : []);
-    }
-
-    return normalizeRankingRows(Array.isArray(rankings[selectedMetricConfig.bestKey]) ? rankings[selectedMetricConfig.bestKey] : [])
-      .filter((row) => Number(row.total_quantity || 0) > 0);
-  }, [rankingView, rankings, selectedMetricConfig.bestKey, selectedMetricConfig.worstKey]);
-
-  const categoryRowCounts = useMemo(() => {
-    const counts = categoryFilterSourceRows.reduce((accumulator, row) => {
-      const key = String(row.category_key || 'autres');
-      accumulator[key] = (accumulator[key] || 0) + 1;
-      return accumulator;
-    }, {});
-
-    counts.all = categoryFilterSourceRows.length;
-    return counts;
-  }, [categoryFilterSourceRows]);
-
   const normalizedMenuPricingImpact = useMemo(() => {
     return menuPricingImpact
       .filter((row) => Math.abs(Number(row?.unit_cost_change_amount || 0)) >= 0.01)
       .map((row) => ({
         ...row,
-        category_key: getCategoryMeta(row?.menu_category).key,
+        category_key: getCategoryMeta(row?.menu_family || row?.menu_category).key,
       }));
   }, [menuPricingImpact]);
 
   const filteredMenuPricingImpact = useMemo(() => {
-    if (selectedCategory === 'all') {
-      return normalizedMenuPricingImpact;
-    }
-
-    return normalizedMenuPricingImpact.filter((row) => row.category_key === selectedCategory);
-  }, [normalizedMenuPricingImpact, selectedCategory]);
+    return normalizedMenuPricingImpact.filter((row) => (
+      (impactCategory === 'all' || row.category_key === impactCategory)
+      && (impactAction === 'all' || row.recommended_action === impactAction)
+    ));
+  }, [normalizedMenuPricingImpact, impactCategory, impactAction]);
 
   useEffect(() => {
     if (selectedCategory === 'all') {
@@ -456,10 +410,16 @@ const RevenueDashboard = () => {
     }
   }, [categoryOptions, selectedCategory]);
 
+  useEffect(() => {
+    if (impactCategory !== 'all' && !categoryOptions.some((option) => option.key === impactCategory)) {
+      setImpactCategory('all');
+    }
+  }, [categoryOptions, impactCategory]);
+
   const rankingColumns = [
     {
       key: 'rank_in_category',
-      header: 'Rang cat.',
+      header: 'Rang famille',
       sortType: 'number',
       sortAccessor: (row) => Number(row.rank_in_category || 0),
       searchAccessor: (row) => String(row.rank_in_category || ''),
@@ -467,7 +427,7 @@ const RevenueDashboard = () => {
     },
     {
       key: 'category_label',
-      header: 'Catégorie',
+      header: 'Famille',
       sortAccessor: (row) => row.category_label || '',
       searchAccessor: (row) => row.category_label || '',
       render: (row) => row.category_label || '-',
@@ -488,12 +448,20 @@ const RevenueDashboard = () => {
       render: (row) => Number(row.total_quantity || 0),
     },
     {
-      key: 'total_revenue',
-      header: 'Recette brute',
+      key: 'total_revenue_net',
+      header: 'Recette nette',
       sortType: 'number',
-      sortAccessor: (row) => Number(row.total_revenue || 0),
-      searchAccessor: (row) => String(row.total_revenue || ''),
-      render: (row) => formatAr(row.total_revenue),
+      sortAccessor: (row) => Number(row.total_revenue_net || 0),
+      searchAccessor: (row) => String(row.total_revenue_net || ''),
+      render: (row) => formatAr(row.total_revenue_net),
+    },
+    {
+      key: 'total_discount',
+      header: 'Remises',
+      sortType: 'number',
+      sortAccessor: (row) => Number(row.total_discount || 0),
+      searchAccessor: (row) => String(row.total_discount || ''),
+      render: (row) => formatAr(row.total_discount),
     },
     {
       key: 'total_cost',
@@ -524,14 +492,14 @@ const RevenueDashboard = () => {
   const categoryTopColumns = [
     {
       key: 'category_label',
-      header: 'Catégorie',
+      header: 'Famille',
       sortAccessor: (row) => `${String(Number(row.category_order || 999)).padStart(3, '0')}-${String(Number(row.rank_in_category || 999)).padStart(3, '0')}`,
       searchAccessor: (row) => row.category_label || '',
       render: (row) => row.category_label || '-',
     },
     {
       key: 'rank_in_category',
-      header: 'Rang cat.',
+      header: 'Rang famille',
       sortType: 'number',
       sortAccessor: (row) => Number(row.rank_in_category || 0),
       searchAccessor: (row) => String(row.rank_in_category || ''),
@@ -553,12 +521,12 @@ const RevenueDashboard = () => {
       render: (row) => Number(row.total_quantity || 0),
     },
     {
-      key: 'total_revenue',
-      header: 'Recette brute',
+      key: 'total_revenue_net',
+      header: 'Recette nette',
       sortType: 'number',
-      sortAccessor: (row) => Number(row.total_revenue || 0),
-      searchAccessor: (row) => String(row.total_revenue || ''),
-      render: (row) => formatAr(row.total_revenue),
+      sortAccessor: (row) => Number(row.total_revenue_net || 0),
+      searchAccessor: (row) => String(row.total_revenue_net || ''),
+      render: (row) => formatAr(row.total_revenue_net),
     },
     {
       key: 'total_profit',
@@ -590,7 +558,7 @@ const RevenueDashboard = () => {
 
   const unifiedRankingEmptyMessage = (
     selectedCategoryMeta
-      ? `Aucun résultat pour ${unifiedRankingTitle.toLowerCase()} dans la catégorie ${selectedCategoryMeta.label}.`
+      ? `Aucun résultat pour ${unifiedRankingTitle.toLowerCase()} dans la famille ${selectedCategoryMeta.label}.`
       : `Aucun résultat pour ${unifiedRankingTitle.toLowerCase()} sur la période.`
   );
 
@@ -600,21 +568,9 @@ const RevenueDashboard = () => {
     { value: 'worst', label: selectedMetricConfig.worstTitle },
   ];
 
-  const activeRankingFilterCount = useMemo(() => (
-    [
-      scope !== 'rolling_week',
-      selectedUserId !== 'all',
-      topLimit !== 5,
-      rankingMetric !== 'demand',
-      rankingView !== 'top',
-      selectedCategory !== 'all',
-    ].filter(Boolean).length
-  ), [rankingMetric, rankingView, scope, selectedCategory, selectedUserId, topLimit]);
-
   const menuImpactSummary = useMemo(() => {
     return filteredMenuPricingImpact.reduce((acc, row) => {
       const action = String(row?.recommended_action || '');
-      const absoluteCostChange = Math.abs(Number(row?.unit_cost_change_amount || 0));
 
       if (action === 'increase') {
         acc.increase += 1;
@@ -625,7 +581,6 @@ const RevenueDashboard = () => {
       }
 
       acc.total += 1;
-      acc.absoluteCostChangeTotal += absoluteCostChange;
 
       return acc;
     }, {
@@ -633,7 +588,6 @@ const RevenueDashboard = () => {
       decrease: 0,
       keep: 0,
       total: 0,
-      absoluteCostChangeTotal: 0,
     });
   }, [filteredMenuPricingImpact]);
 
@@ -689,68 +643,46 @@ const RevenueDashboard = () => {
 
   const menuPricingImpactColumns = [
     {
-      key: 'recommended_action',
-      header: 'Décision',
-      sortAccessor: (row) => row.recommended_action || '',
-      searchAccessor: (row) => row.recommended_action || '',
+      key: 'menu_name',
+      header: 'Menu et décision',
+      sortAccessor: (row) => row.menu_name || '',
+      searchAccessor: (row) => `${row.menu_name || ''} ${getCategoryMeta(row.menu_family || row.menu_category).label} ${row.recommended_action || ''}`,
       render: (row) => {
         const action = actionMetaMap[row.recommended_action] || actionMetaMap.keep;
-        return <span className={action.className}>{action.label}</span>;
+        return (
+          <div className="revenue-impact-cell">
+            <strong>{row.menu_name || '-'}</strong>
+            <span>{getCategoryMeta(row.menu_family || row.menu_category).label}</span>
+            <span className={action.className}>{action.label}</span>
+          </div>
+        );
       },
     },
     {
-      key: 'menu_name',
-      header: 'Menu',
-      sortAccessor: (row) => row.menu_name || '',
-      searchAccessor: (row) => row.menu_name || '',
-      render: (row) => row.menu_name || '-',
-    },
-    {
-      key: 'menu_category',
-      header: 'Catégorie',
-      sortAccessor: (row) => getCategoryMeta(row.menu_category).label,
-      searchAccessor: (row) => getCategoryMeta(row.menu_category).label,
-      render: (row) => getCategoryMeta(row.menu_category).label,
-    },
-    {
-      key: 'baseline_unit_cost',
-      header: 'Coût avant',
-      sortType: 'number',
-      sortAccessor: (row) => Number(row.baseline_unit_cost || 0),
-      searchAccessor: (row) => String(row.baseline_unit_cost || ''),
-      render: (row) => formatAr(row.baseline_unit_cost),
-    },
-    {
-      key: 'current_unit_cost',
-      header: 'Coût après',
-      sortType: 'number',
-      sortAccessor: (row) => Number(row.current_unit_cost || 0),
-      searchAccessor: (row) => String(row.current_unit_cost || ''),
-      render: (row) => formatAr(row.current_unit_cost),
-    },
-    {
       key: 'unit_cost_change_amount',
-      header: 'Impact coût',
+      header: 'Coût par portion',
       sortType: 'number',
       sortAccessor: (row) => Math.abs(Number(row.unit_cost_change_amount || 0)),
       searchAccessor: (row) => String(row.unit_cost_change_amount || ''),
-      render: (row) => formatSignedAr(row.unit_cost_change_amount),
+      render: (row) => (
+        <div className="revenue-impact-cell">
+          <strong>{formatAr(row.current_unit_cost)}</strong>
+          <span>Avant {formatAr(row.baseline_unit_cost)} · {formatSignedAr(row.unit_cost_change_amount)}</span>
+        </div>
+      ),
     },
     {
       key: 'current_catalog_price',
-      header: 'Prix actuel',
+      header: 'Prix et bénéfice / coût',
       sortType: 'number',
       sortAccessor: (row) => Number(row.current_catalog_price || 0),
       searchAccessor: (row) => String(row.current_catalog_price || ''),
-      render: (row) => formatAr(row.current_catalog_price),
-    },
-    {
-      key: 'current_profit_on_cost_percent',
-      header: 'Bénéfice / coût',
-      sortType: 'number',
-      sortAccessor: (row) => Number(row.current_profit_on_cost_percent || 0),
-      searchAccessor: (row) => String(row.current_profit_on_cost_percent || ''),
-      render: (row) => `${Number(row.current_profit_on_cost_percent || 0).toFixed(1)}%`,
+      render: (row) => (
+        <div className="revenue-impact-cell">
+          <strong>{formatAr(row.current_catalog_price)}</strong>
+          <span>{Number(row.current_profit_on_cost_percent || 0).toFixed(1)}% de bénéfice / coût</span>
+        </div>
+      ),
     },
     {
       key: 'actions',
@@ -785,6 +717,22 @@ const RevenueDashboard = () => {
           </button>
         </div>
 
+        <div className="revenue-report-context">
+          <label className="form-group">
+            <span>Période analysée</span>
+            <select value={scope} onChange={(event) => setScope(event.target.value)}>
+              {SCOPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="form-group">
+            <span>Utilisateur</span>
+            <select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
+              <option value="all">Tous les utilisateurs</option>
+              {users.map((user) => <option key={user.id} value={String(user.id)}>{user.name} ({user.role})</option>)}
+            </select>
+          </label>
+        </div>
+
         <div className="revenue-dashboard-top-stats">
           <div className="stat-card">
             <h3>Recettes nettes</h3>
@@ -793,9 +741,9 @@ const RevenueDashboard = () => {
           </div>
 
           <div className="stat-card">
-            <h3>Recettes globales</h3>
+            <h3>Ventes avant remises</h3>
             <div className="stat-number">{formatAr(summary.total_revenue_gross)}</div>
-            <p>Avant remises</p>
+            <p>Base avant réduction, à titre indicatif</p>
           </div>
 
           <div className="stat-card">
@@ -805,13 +753,18 @@ const RevenueDashboard = () => {
           </div>
 
           <div className="stat-card">
-            <h3>Barquettes</h3>
-            <div className="stat-number">{formatAr(summary.packaging_revenue_net)}</div>
-            <p>
-              {Number(summary.packaging_quantity_total || 0)} unité(s) · Brut: {formatAr(summary.packaging_revenue_gross)}
-            </p>
+            <h3>Plats</h3>
+            <div className="stat-number">{formatAr(summary.dishes_revenue_net)}</div>
+            <p>Net, emballages inclus</p>
+          </div>
+
+          <div className="stat-card">
+            <h3>Boissons</h3>
+            <div className="stat-number">{formatAr(summary.drinks_revenue_net)}</div>
+            <p>Net, cocktails inclus</p>
           </div>
         </div>
+        <p className="form-hint revenue-reconciliation">Plats + boissons = recettes nettes. Les remises ne créent pas de mouvement de caisse : seuls les montants réellement encaissés alimentent les comptes.</p>
       </div>
 
       {message ? (
@@ -823,173 +776,49 @@ const RevenueDashboard = () => {
       <div className="card">
         <div className="revenue-dashboard-section-header">
           <h3>Détail du classement · {unifiedRankingTitle}{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
-          <div className="revenue-dashboard-section-actions">
-            <div className="form-hint revenue-dashboard-section-meta">
-              Vue: <strong>{report?.filters?.scope_label || scopeLabel(scope)}</strong> · Utilisateur: <strong>{selectedUserLabel}</strong> · Intervalle analysé: du <strong>{formatDateTime(report?.filters?.from)}</strong> au <strong>{formatDateTime(report?.filters?.to)}</strong>
-            </div>
-            <button
-              type="button"
-              className={`btn btn-sm ${showRankingFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
-              onClick={() => setShowRankingFilters((previous) => !previous)}
-            >
-              <span>{showRankingFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
-              {activeRankingFilterCount > 0 ? <strong>{activeRankingFilterCount}</strong> : null}
-            </button>
-          </div>
         </div>
-        {showRankingFilters ? (
-          <div className="revenue-ranking-toolbar">
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Période</span>
-              <div className="treasury-filter-toggles">
-                {SCOPE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`treasury-filter-toggle ${scope === option.value ? 'is-active' : ''}`}
-                    onClick={() => setScope(option.value)}
-                  >
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Utilisateur</span>
-              <div className="treasury-filter-toggles">
-                <button
-                  type="button"
-                  className={`treasury-filter-toggle ${selectedUserId === 'all' ? 'is-active' : ''}`}
-                  onClick={() => setSelectedUserId('all')}
-                >
-                  <span>Tous les utilisateurs</span>
-                </button>
-                {users.map((user) => (
-                  <button
-                    key={user.id}
-                    type="button"
-                    className={`treasury-filter-toggle ${selectedUserId === String(user.id) ? 'is-active' : ''}`}
-                    onClick={() => setSelectedUserId(String(user.id))}
-                  >
-                    <span>{user.name} ({user.role})</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Taille du top</span>
-              <div className="treasury-filter-toggles">
-                {TOP_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={`treasury-filter-toggle ${topLimit === option ? 'is-active' : ''}`}
-                    onClick={() => setTopLimit(option)}
-                  >
-                    <span>Top {option}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Indicateur</span>
-              <div className="treasury-filter-toggles">
-                {Object.entries(rankingMetricConfig).map(([metricKey, metricConfig]) => (
-                  <button
-                    key={metricKey}
-                    type="button"
-                    className={`treasury-filter-toggle ${rankingMetric === metricKey ? 'is-active' : ''}`}
-                    onClick={() => setRankingMetric(metricKey)}
-                  >
-                    <span>{metricConfig.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Vue classement</span>
-              <div className="treasury-filter-toggles">
-                {rankingViewOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`treasury-filter-toggle ${rankingView === option.value ? 'is-active' : ''}`}
-                    onClick={() => setRankingView(option.value)}
-                  >
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Catégorie</span>
-              <div className="treasury-filter-toggles">
-                <button
-                  type="button"
-                  className={`treasury-filter-toggle ${selectedCategory === 'all' ? 'is-active' : ''}`}
-                  onClick={() => setSelectedCategory('all')}
-                >
-                  <span>Toutes catégories</span>
-                  <strong>{categoryRowCounts.all || 0}</strong>
-                </button>
-                {categoryOptions.map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    className={`treasury-filter-toggle ${selectedCategory === option.key ? 'is-active' : ''}`}
-                    onClick={() => setSelectedCategory(option.key)}
-                  >
-                    <span>{option.label}</span>
-                    <strong>{categoryRowCounts[option.key] || 0}</strong>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <p className="form-hint revenue-period-hint">{report?.filters?.scope_label || scopeLabel(scope)} · {selectedUserLabel} · du {formatDateTime(report?.filters?.from)} au {formatDateTime(report?.filters?.to)}</p>
+        <div className="revenue-filter-grid" aria-label="Filtres du classement">
+          <label className="form-group"><span>Famille</span><select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
+            <option value="all">Plats et boissons</option>
+            {categoryOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select></label>
+          <label className="form-group"><span>Indicateur</span><select value={rankingMetric} onChange={(event) => setRankingMetric(event.target.value)}>
+            {Object.entries(rankingMetricConfig).map(([key, config]) => <option key={key} value={key}>{config.label}</option>)}
+          </select></label>
+          <label className="form-group"><span>Classement</span><select value={rankingView} onChange={(event) => setRankingView(event.target.value)}>
+            {rankingViewOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select></label>
+          <label className="form-group"><span>Par famille</span><select value={topLimit} onChange={(event) => setTopLimit(Number(event.target.value))}>
+            {TOP_OPTIONS.map((option) => <option key={option} value={option}>Top {option}</option>)}
+          </select></label>
+        </div>
         <DataTable
           columns={unifiedRankingColumns}
           data={unifiedRankingRows}
-          rowKey={(row) => `${row.menu_id}-${row.category_key || 'autres'}-${rankingView}-${row.rank_in_category || 0}`}
-          searchPlaceholder="Rechercher un plat (menu/catégorie)..."
+          rowKey={(row) => `${row.menu_id}-${row.category_key || 'dishes'}-${rankingView}-${row.rank_in_category || 0}`}
+          searchPlaceholder="Rechercher un menu ou une famille..."
           initialSort={{ key: rankingView === 'top' && selectedCategory === 'all' ? 'category_label' : 'rank_in_category', direction: 'asc' }}
           emptyMessage={unifiedRankingEmptyMessage}
         />
       </div>
 
       <div className="card">
-        <h3>Impact coûts menus et décision de prix{selectedCategoryMeta ? ` · ${selectedCategoryMeta.label}` : ''}</h3>
-        <div className="pricing-insights-grid">
-          <div className="pricing-insight-card danger">
-            <span>Hausse proposée</span>
-            <strong>{menuImpactSummary.increase}</strong>
-          </div>
-          <div className="pricing-insight-card success">
-            <span>Baisse proposée</span>
-            <strong>{menuImpactSummary.decrease}</strong>
-          </div>
-          <div className="pricing-insight-card stable">
-            <span>Prix aligné</span>
-            <strong>{menuImpactSummary.keep}</strong>
-          </div>
-          <div className="pricing-insight-card cool">
-            <span>Menus concernés</span>
-            <strong>{menuImpactSummary.total}</strong>
-          </div>
-          <div className="pricing-insight-card warning">
-            <span>Écart coût moyen</span>
-            <strong>
-              {menuImpactSummary.total > 0
-                ? formatAr(menuImpactSummary.absoluteCostChangeTotal / menuImpactSummary.total)
-                : formatAr(0)}
-            </strong>
-          </div>
+        <h3>Impact coûts menus et décision de prix</h3>
+        <p className="form-hint">Le coût de référence évolue après votre choix à l'achat ; les prix des menus ne changent jamais automatiquement.</p>
+        <div className="revenue-filter-grid revenue-impact-filters" aria-label="Filtres des coûts des menus">
+          <label className="form-group"><span>Famille</span><select value={impactCategory} onChange={(event) => setImpactCategory(event.target.value)}>
+            <option value="all">Plats et boissons</option>
+            {categoryOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select></label>
+          <label className="form-group"><span>Décision</span><select value={impactAction} onChange={(event) => setImpactAction(event.target.value)}>
+            <option value="all">Toutes les décisions</option>
+            <option value="increase">Hausse proposée</option>
+            <option value="decrease">Baisse proposée</option>
+            <option value="keep">Prix aligné</option>
+          </select></label>
         </div>
+        <p className="revenue-impact-summary">{menuImpactSummary.total} menu(s) affiché(s) · {menuImpactSummary.increase} hausse(s) · {menuImpactSummary.decrease} baisse(s) · {menuImpactSummary.keep} prix aligné(s)</p>
 
         <DataTable
           columns={menuPricingImpactColumns}
@@ -997,9 +826,7 @@ const RevenueDashboard = () => {
           rowKey={(row) => row.menu_id}
           searchPlaceholder="Rechercher un menu impacté..."
           initialSort={{ key: 'unit_cost_change_amount', direction: 'desc' }}
-          emptyMessage={selectedCategoryMeta
-            ? `Aucun menu impacté à afficher pour la catégorie ${selectedCategoryMeta.label}.`
-            : 'Aucun menu impacté à afficher.'}
+          emptyMessage="Aucun menu impacté pour ces filtres."
         />
       </div>
 

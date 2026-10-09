@@ -84,10 +84,16 @@
   et enregistre dette et paiement initial dans une transaction. L'admin choisit
   a chaque achat si son prix unitaire devient le cout de reference : si oui,
   les couts d'ingredients et les marges sont recalcules, mais les prix de vente
-  ne changent pas automatiquement.
+  ne changent pas automatiquement. Si l'achat est paye integralement, le compte
+  debite reste visible et est confirme avant l'enregistrement.
+- Dans le formulaire de menu, le prix de vente deja existant affiche maintenant
+  la marge sur cout estimee en direct a partir des ingredients de la recette.
+  C'est un apercu ; seul le prix saisi est enregistre lors de la validation.
 - Les cartes CA Plats/Boissons de l'admin et de la caisse utilisent la meme
   repartition et la journee Indian/Antananarivo. Les rapports admin du jour
   suivent cette journee ; les autres periodes et historiques restent disponibles.
+  Dans Recettes & analyse, les remises apparaissent separement du net ; les
+  recommandations de prix restent des decisions manuelles.
 - Un UUID de validation empeche de recreer la commande apres une reprise reseau.
 - Les commandes historiques sont marquees `legacy` : leur stock avait deja ete
   retire dans l'ancien flux. Le paiement ne le soustrait pas une seconde fois.

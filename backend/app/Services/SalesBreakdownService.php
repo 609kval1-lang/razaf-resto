@@ -7,6 +7,11 @@ use App\Support\Ariary;
 
 class SalesBreakdownService
 {
+    public function familyForMenu(string $category, string $name, string $station = ''): string
+    {
+        return $this->salesBucket($category, $name, $station) === 'restaurant' ? 'dishes' : 'drinks';
+    }
+
     public function summarize($payments): array
     {
         $totals = ['restaurant' => 0.0, 'boissons' => 0.0, 'cocktails' => 0.0];

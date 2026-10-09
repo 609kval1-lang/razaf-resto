@@ -62,6 +62,10 @@ Le flux serveur, cuisine et bar est conserve dans `../archives/flux-precedent/`.
   distribue les Ariary restants au lieu d'arrondir chaque ligne independamment.
 - Le rapport de recettes conserve sa logique d'encaissements : brut = net +
   remises des paiements encaisses dans la periode, emballages inclus.
+  La vue admin ventile le net entre Plats (emballages compris) et Boissons
+  (cocktails compris) ; ces deux montants se reconciliant au net total.
+  Le classement affiche aussi le net et la remise attribues a chaque menu,
+  tandis que le brut reste disponible dans l'API pour l'audit.
   Les paiements fractionnes repartissent les couts au prorata du brut encaisse,
   pour ne pas reprendre le cout integral a chaque date de paiement.
 - Benefice global estime = net encaisse - cout estime des ingredients.

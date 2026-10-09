@@ -172,6 +172,35 @@ class CashierCheckoutStockTest extends TestCase
         }
     }
 
+    public function test_discount_reduces_collections_across_accounts_without_extra_money_movements(): void
+    {
+        foreach (['cash' => 'cash', 'mobile_money' => 'mobile_money', 'transfer' => 'bank', 'check' => 'bank'] as $method => $account) {
+            $this->raw->refresh()->update(['stock' => 1.00001]);
+            $order = $this->createOrder();
+            $this->postJson("/api/cashier/orders/{$order->id}/prepare-payment", [
+                'method' => $method, 'discount_percent' => 10,
+            ])->assertOk();
+
+            $this->postJson("/api/cashier/orders/{$order->id}/payment", ['method' => $method])
+                ->assertOk()
+                ->assertJsonPath('amount_paid', 2252);
+
+            $this->assertDatabaseHas('cash_movements', [
+                'order_id' => $order->id,
+                'destination_account' => $account,
+                'amount' => 2252,
+            ]);
+            $this->assertSame(1, CashMovement::query()->where('order_id', $order->id)->count());
+        }
+
+        Sanctum::actingAs(User::factory()->create(['role' => 'admin']));
+        $report = $this->getJson('/api/admin/revenue-report')->assertOk();
+        $this->assertEquals(10008, $report->json('summary.total_revenue_gross'));
+        $this->assertEquals(1000, $report->json('summary.total_discount'));
+        $this->assertEquals(9008, $report->json('summary.total_revenue_net'));
+        $this->assertEquals(9008, $report->json('summary.dishes_revenue_net'));
+    }
+
     public function test_fractional_partial_payment_is_rejected_without_stock_consumption_or_money(): void
     {
         $order = $this->createOrder();

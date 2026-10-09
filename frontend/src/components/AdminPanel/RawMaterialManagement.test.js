@@ -50,6 +50,28 @@ test('records an existing-material purchase with an explicit cost decision and n
   expect(adminAPI.createSupplierPurchase).toHaveBeenCalledTimes(1);
 });
 
+test('shows the debit account for a full purchase before entering an amount and uses the selected account', async () => {
+  adminAPI.getRawMaterials.mockResolvedValue({ data: [{
+    id: 4, name: 'Farine', unit: 'kg', stock: 1, cost: 100, suppliers: [{ id: 1, name: 'Supplier' }],
+  }] });
+  render(<RawMaterialManagement />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Enregistrer un achat' }));
+  fireEvent.change(screen.getByLabelText('Règlement'), { target: { value: 'cash' } });
+
+  expect(screen.getByLabelText('Compte débité')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Matière première'), { target: { value: '4' } });
+  fireEvent.change(screen.getByLabelText('Quantité (kg)'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText("Prix d'achat par unité (Ar)"), { target: { value: '150' } });
+  fireEvent.change(screen.getByLabelText('Compte débité'), { target: { value: 'safe' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmer l’achat' }));
+
+  await waitFor(() => expect(adminAPI.createSupplierPurchase).toHaveBeenCalledWith(1, expect.objectContaining({
+    raw_material_id: 4, quantity: 2, unit_price: 150, payment_mode: 'cash',
+    initial_paid_amount: 300, payment_method: 'cash', cash_source_account: 'safe',
+  })));
+  expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('depuis Coffre') }));
+});
+
 test('keeps fractional stock quantities while financial inputs and purchase totals use whole Ariary', async () => {
   render(<RawMaterialManagement />);
   fireEvent.click(await screen.findByRole('button', { name: /Ajouter Mati/ }));

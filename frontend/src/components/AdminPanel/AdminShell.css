@@ -78,7 +78,111 @@
   color: var(--primary);
 }
 
+.admin-shell .revenue-dashboard-top-stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+}
+
+.revenue-report-context,
+.revenue-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.revenue-report-context {
+  max-width: 620px;
+}
+
+.revenue-report-context .form-group,
+.revenue-filter-grid .form-group {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+.revenue-report-context select,
+.revenue-filter-grid select {
+  width: 100%;
+}
+
+.revenue-period-hint,
+.revenue-reconciliation {
+  margin: 0 0 12px;
+}
+
+.revenue-reconciliation {
+  margin-bottom: 0;
+}
+
+.revenue-impact-filters {
+  max-width: 500px;
+}
+
+.revenue-impact-summary {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.revenue-impact-cell {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.revenue-impact-cell strong {
+  color: var(--text-main);
+}
+
+.revenue-impact-cell > span:not(.pricing-action) {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.menu-pricing-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.menu-pricing-preview > div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #edf4ed;
+}
+
+.menu-pricing-preview span {
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.menu-pricing-preview strong {
+  color: var(--primary);
+}
+
+.menu-pricing-preview strong.is-negative {
+  color: var(--danger);
+}
+
+.menu-pricing-hint {
+  margin: 0 0 16px;
+}
+
 @media (max-width: 760px) {
+  .admin-shell .revenue-dashboard-top-stats .stat-card:first-child {
+    grid-column: 1 / -1;
+  }
+
   .restaurant-workspace.admin-shell .admin-content {
     padding: 14px 12px 22px;
   }

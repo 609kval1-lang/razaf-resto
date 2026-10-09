@@ -110,6 +110,30 @@ class CashierDashboardTest extends TestCase
         $this->assertSame($cashier->json('total_revenue'), $admin->json('revenue_breakdown_today.total'));
         $this->assertSame(1000, $admin->json('revenue_breakdown_today.dishes'));
         $this->assertSame(11100, $admin->json('revenue_breakdown_today.drinks'));
+
+        $report = $this->getJson('/api/admin/revenue-report?scope=day')->assertOk();
+        $this->assertSame(1000, $report->json('summary.dishes_revenue_net'));
+        $this->assertSame(11100, $report->json('summary.drinks_revenue_net'));
+        $this->assertSame(['dishes', 'drinks'], collect($report->json('category_summary'))->pluck('category')->sort()->values()->all());
+        $this->assertSame(['dishes', 'drinks'], collect($report->json('rankings.most_demanded'))->pluck('rank_category')->unique()->sort()->values()->all());
+    }
+
+    public function test_discounted_drink_reconciles_net_families_and_menu_rankings(): void
+    {
+        $this->sale('2026-10-08 08:00:00', 1000, 'main', 'Plat');
+        $drink = $this->sale('2026-10-08 08:01:00', 1000, 'drink', 'Jus');
+        $drink->update(['amount' => 900, 'discount_amount' => 100, 'discount_percent' => 10]);
+
+        Sanctum::actingAs(User::factory()->create(['role' => 'admin']));
+        $report = $this->getJson('/api/admin/revenue-report?scope=day')->assertOk();
+
+        $this->assertSame(2000, $report->json('summary.total_revenue_gross'));
+        $this->assertSame(100, $report->json('summary.total_discount'));
+        $this->assertSame(1900, $report->json('summary.total_revenue_net'));
+        $this->assertSame(1000, $report->json('summary.dishes_revenue_net'));
+        $this->assertSame(900, $report->json('summary.drinks_revenue_net'));
+        $this->assertSame(900, collect($report->json('rankings.highest_net_revenue'))
+            ->firstWhere('menu_name', 'Jus')['total_revenue_net']);
     }
 
     public function test_admin_day_report_and_cash_entries_follow_local_day_boundaries(): void

@@ -821,7 +821,7 @@ const RawMaterialManagement = () => {
 
     const approved = await confirm({
       title: 'Confirmer l’achat fournisseur',
-      message: `${selectedExistingPurchaseMaterial.name} : ${formatQty(quantity)} ${selectedExistingPurchaseMaterial.unit} pour ${formatAr(existingPurchaseTotal)}. Paiement immédiat : ${formatAr(initialPaid)}. Reste à payer : ${formatAr(remaining)}.`,
+      message: `${selectedExistingPurchaseMaterial.name} : ${formatQty(quantity)} ${selectedExistingPurchaseMaterial.unit} pour ${formatAr(existingPurchaseTotal)}. Paiement immédiat : ${formatAr(initialPaid)}${initialPaid > 0 ? ` depuis ${existingPurchaseSettlementConfig.debit_account_label}` : ' (aucun compte débité)'}. Reste à payer : ${formatAr(remaining)}.`,
       confirmText: 'Enregistrer l’achat',
       cancelText: 'Annuler',
       tone: 'primary',
@@ -1194,7 +1194,7 @@ const RawMaterialManagement = () => {
                     onChange={(event) => setPurchaseForm((previous) => ({ ...previous, initial_paid_amount: event.target.value }))} />
                 </div>
               ) : null}
-              {existingPurchaseInitialPaid > 0 ? (
+              {purchaseForm.payment_mode === 'cash' || existingPurchaseInitialPaid > 0 ? (
                 <div className="form-group">
                   <label htmlFor="purchase-settlement">Compte débité</label>
                   <select id="purchase-settlement" value={existingPurchaseSettlementValue}

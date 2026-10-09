@@ -233,6 +233,10 @@ class MoneyCalculationTest extends TestCase
         $this->assertEquals(7900, $report->json('summary.total_estimated_profit'));
         $this->assertEquals(1000, $report->json('summary.packaging_revenue_gross'));
         $this->assertEquals(900, $report->json('summary.packaging_revenue_net'));
+        $this->assertEquals(9900, $report->json('summary.dishes_revenue_net'));
+        $this->assertEquals(0, $report->json('summary.drinks_revenue_net'));
+        $this->assertEquals(9000, $report->json('menu_stats.0.total_revenue_net'));
+        $this->assertEquals(1000, $report->json('menu_stats.0.total_discount'));
         $this->assertEquals(7000, $report->json('menu_stats.0.total_profit'));
     }
 
@@ -277,6 +281,14 @@ class MoneyCalculationTest extends TestCase
         $this->assertEquals(5, $report->json('total_revenue'));
         $this->assertEquals(5, $report->json('sales_breakdown.total'));
         $this->assertEquals(5, $report->json('sales_breakdown.restaurant'));
+
+        Sanctum::actingAs(User::factory()->create(['role' => 'admin']));
+        $adminReport = $this->getJson('/api/admin/revenue-report?scope=day')->assertOk();
+        $this->assertEquals(5, $adminReport->json('summary.total_revenue_net'));
+        $this->assertEquals(1, $adminReport->json('summary.total_discount'));
+        $this->assertEquals(5, $adminReport->json('summary.dishes_revenue_net'));
+        $this->assertEquals(0, $adminReport->json('summary.drinks_revenue_net'));
+        $this->assertEquals(5, collect($adminReport->json('menu_stats'))->sum('total_revenue_net'));
     }
 
     private function sale(): Order
