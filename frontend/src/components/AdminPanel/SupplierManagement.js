@@ -316,11 +316,6 @@ const SupplierManagement = () => {
     () => purchases.filter((purchase) => Number(purchase?.remaining_amount || 0) > 0),
     [purchases],
   );
-  const settledPurchases = useMemo(
-    () => purchases.filter((purchase) => Number(purchase?.remaining_amount || 0) <= 0),
-    [purchases],
-  );
-
   const selectedSupplier = useMemo(() => suppliers.find((item) => Number(item.id) === Number(activeSupplierId)) || null, [suppliers, activeSupplierId]);
   const outstandingPurchasesCount = outstandingPurchases.length;
   const totalOutstandingForSupplier = useMemo(() => {
@@ -642,8 +637,6 @@ const SupplierManagement = () => {
       },
     },
   ];
-
-  const historyPurchaseColumns = purchaseCommonColumns;
 
   const loadPageData = async ({ skipSpinner = false } = {}) => {
     if (!skipSpinner) setLoading(true);
@@ -1106,6 +1099,7 @@ const SupplierManagement = () => {
             {suppliers.length === 0 ? <option value="">Aucun fournisseur</option> : null}
             {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
           </select>
+          {activeSupplierId ? <Link className="btn btn-secondary btn-sm" to={`/admin/histories?view=suppliers&supplier=${activeSupplierId}`}>Historiques</Link> : null}
         </div>
 
         {!activeSupplierId ? (
@@ -1242,17 +1236,6 @@ const SupplierManagement = () => {
               </div>
             )}
 
-            <div className="card" style={{ margin: 0, padding: '12px' }}>
-              <h3 style={{ marginBottom: '8px' }}>Historique des achats regles</h3>
-              <DataTable
-                columns={historyPurchaseColumns}
-                data={settledPurchases}
-                rowKey="id"
-                searchPlaceholder="Rechercher dans l'historique des paiements..."
-                initialSort={{ key: 'purchased_at', direction: 'desc' }}
-                emptyMessage="Aucun achat totalement regle pour ce fournisseur."
-              />
-            </div>
           </>
         )}
       </div>

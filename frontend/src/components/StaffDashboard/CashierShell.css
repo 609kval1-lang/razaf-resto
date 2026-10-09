@@ -8,19 +8,19 @@
 .cashier-dashboard .staff-stat-card { padding: 10px 14px; }
 .cashier-dashboard .staff-stat-card strong { font-size: 1.4rem; }
 .cashier-dashboard .cq-heading h2 { font-size: 1.5rem; }
-.cashier-dashboard .cq-availability-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 165px), 1fr)); }
+.cashier-dashboard .cq-availability-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 235px), 1fr)); }
 @media (min-width: 1000px) {
-  .cashier-dashboard .cq-availability-card { padding: 10px; gap: 6px; }
-  .cashier-dashboard .cq-dish-name { font-size: 0.76rem; }
+  .cashier-dashboard .cq-availability-card { padding: 14px; gap: 10px; }
+  .cashier-dashboard .cq-dish-name { font-size: 0.9rem; }
   .cashier-dashboard .cq-capacity > strong { font-size: 1.5rem; }
-  .cashier-dashboard .cq-ingredients { font-size: 0.64rem; }
+  .cashier-dashboard .cq-ingredients { font-size: 0.7rem; }
 }
 @media (max-width: 760px) {
   .restaurant-workspace .cashier-content { padding: 14px 12px 22px; }
   .cashier-dashboard .cq-workspace { padding: 14px; }
   .restaurant-workspace .cashier-dashboard .staff-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cashier-dashboard .staff-stat-card:first-child { grid-column: 1 / -1; }
-  .cashier-dashboard .cq-availability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cashier-dashboard .cq-availability-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 235px), 1fr)); }
 }
 @media (max-width: 360px) {
   .cashier-dashboard .cq-availability-grid { grid-template-columns: minmax(0, 1fr); }

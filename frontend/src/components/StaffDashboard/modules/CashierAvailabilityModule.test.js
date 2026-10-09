@@ -135,6 +135,22 @@ test('keeps unavailability reasons in the ingredient detail while showing the st
   expect(within(details).getByText('Riz 100g : 0')).toBeInTheDocument();
 });
 
+test('shows a readable first batch and reveals the remaining dishes on demand', async () => {
+  cashierAPI.getAvailability.mockResolvedValue({ data: { menus: Array.from({ length: 15 }, (_, index) => ({
+    id: index + 1, name: `Plat ${index + 1}`, category: 'Plats', is_orderable: true,
+    max_portions_available: 2,
+  })) } });
+  render(<CashierAvailabilityModule />);
+  await screen.findByRole('article', { name: 'Disponibilite de Plat 1' });
+  expect(screen.getAllByRole('article')).toHaveLength(12);
+  expect(screen.queryByRole('article', { name: 'Disponibilite de Plat 9' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Afficher 12 suivants' }));
+  expect(screen.getAllByRole('article')).toHaveLength(15);
+  fireEvent.change(screen.getByLabelText('Rechercher un plat'), { target: { value: 'Plat 15' } });
+  expect(screen.getAllByRole('article')).toHaveLength(1);
+  expect(screen.getByRole('article', { name: 'Disponibilite de Plat 15' })).toBeInTheDocument();
+});
+
 test('coalesces changes during a request without overlapping or losing the final stock update', async () => {
   let resolve;
   cashierAPI.getAvailability.mockReturnValueOnce(new Promise((done) => { resolve = done; })).mockResolvedValue(snapshot(0));

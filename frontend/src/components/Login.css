@@ -26,6 +26,15 @@
   font-weight: bold;
 }
 
+.login-logo {
+  display: block;
+  width: min(100%, 180px);
+  height: auto;
+  margin: 0 auto 12px;
+  border-radius: 12px;
+  background: #fff;
+}
+
 .login-header p {
   color: #718096;
   margin-bottom: 30px;

@@ -209,6 +209,7 @@ export const adminAPI = {
 
   getCashMovements: (params) => api.get('/admin/cash-movements', { params }),
   getTreasurySnapshot: () => api.get('/admin/treasury'),
+  getTreasuryHistory: (params) => api.get('/admin/treasury/history', { params }),
   createTreasuryTransfer: (payload) => api.post('/admin/treasury/transfers', payload),
   createTreasuryWithdrawal: (payload) => api.post('/admin/treasury/withdrawals', payload),
   processAdminOrderPayment: (orderId, payload) => api.post(`/admin/orders/${orderId}/payment`, payload),

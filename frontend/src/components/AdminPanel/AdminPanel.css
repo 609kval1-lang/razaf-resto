@@ -1134,121 +1134,6 @@
   font-size: 0.84rem;
 }
 
-.treasury-history-toolbar {
-  display: grid;
-  gap: 14px;
-  margin-bottom: 14px;
-  padding: 14px;
-  border-radius: 18px;
-  border: 1px solid #dbe7f3;
-  background:
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 32%),
-    linear-gradient(180deg, #f8fbff, #f1f7ff);
-}
-
-.treasury-filter-block {
-  display: grid;
-  gap: 8px;
-}
-
-.treasury-filter-label {
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #475569;
-}
-
-.treasury-filter-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.treasury-filter-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 13px;
-  border: 1px solid #cdd9e8;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #0f172a;
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.treasury-filter-toggle:hover {
-  transform: translateY(-1px);
-  border-color: #93c5fd;
-  box-shadow: 0 8px 18px rgba(148, 163, 184, 0.14);
-}
-
-.treasury-filter-toggle span {
-  color: inherit;
-}
-
-.treasury-filter-toggle strong {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #e2e8f0;
-  color: #1e293b;
-  font-size: 0.76rem;
-}
-
-.treasury-filter-toggle.is-active {
-  border-color: #0f766e;
-  background: linear-gradient(180deg, #ecfdf5, #dff7f1);
-  color: #115e59;
-  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
-}
-
-.treasury-filter-toggle.is-active strong {
-  background: rgba(15, 118, 110, 0.14);
-  color: #0f766e;
-}
-
-.treasury-history-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.section-header-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.filter-toggle-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.filter-toggle-inline strong {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.12);
-  color: inherit;
-  font-size: 0.74rem;
-}
-
 @media (max-width: 900px) {
   .supplier-bulk-settlement-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1260,10 +1145,6 @@
 
   .supplier-bulk-settlement-actions .btn {
     width: 100%;
-  }
-
-  .treasury-history-summary {
-    justify-content: flex-start;
   }
 
   .revenue-dashboard-section-actions {
@@ -1895,6 +1776,70 @@
   gap: 4px;
 }
 
+.raw-material-table .data-table {
+  min-width: 800px;
+}
+
+.raw-material-table .data-table th:first-child,
+.raw-material-table .data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 182px;
+  min-width: 182px;
+  background: #fff;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.raw-material-table .data-table th:first-child {
+  z-index: 2;
+  background: #f8fafc;
+}
+
+.raw-material-table .data-table tr:hover td:first-child {
+  background: #f8fafc;
+}
+
+.raw-material-table .raw-material-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.raw-material-actions .btn {
+  min-width: 0;
+  padding: 7px 5px;
+}
+
+.raw-material-table .data-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+.raw-material-stock-cell {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
+
+.raw-material-stock-cell .stock-limit-indicator {
+  width: 100%;
+}
+
+.raw-material-supplier-names {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.raw-material-portions summary {
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .raw-material-portions strong {
   color: #0f172a;
   font-size: 0.86rem;
@@ -1909,6 +1854,23 @@
   color: #64748b;
   font-size: 0.78rem;
   line-height: 1.35;
+}
+
+@media (max-width: 768px) {
+  .raw-material-table .data-table {
+    min-width: 0;
+  }
+
+  .raw-material-table .data-table td:first-child {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    box-shadow: none;
+  }
+
+  .raw-material-table .raw-material-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .message,

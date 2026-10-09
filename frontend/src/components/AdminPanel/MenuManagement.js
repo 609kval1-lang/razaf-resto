@@ -760,8 +760,6 @@ const MenuManagement = () => {
                 <div><span>Prix saisi</span><strong>{validSalePrice ? formatAr(formData.price) : 'Prix invalide'}</strong></div>
                 <div><span>Marge sur coût</span><strong className={Number(estimatedProfitOnCost) < 0 ? 'is-negative' : ''}>{estimatedProfitOnCost === null ? 'Non calculable' : `${estimatedProfitOnCost} %`}</strong></div>
               </div>
-              <p className="form-hint menu-pricing-hint">Bénéfice / coût = (prix de vente - coût des ingrédients) / coût des ingrédients. Une valeur négative signale une vente à perte estimée.</p>
-
               <div className="form-group">
                 <label>Image du menu (fichier local)</label>
                 <input

@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import restaurantLogo from '../../restaurant-logo.jpg';
 import './WorkspaceHeader.css';
 
 const matchesPath = (pathname, path) => pathname === path || pathname.startsWith(`${path}/`);
@@ -26,7 +27,10 @@ export default function WorkspaceHeader({ section, groups, pathname, userName, o
 
   return <header ref={headerRef} className={`workspace-topbar ${className}`} onKeyDown={closeSubmenu}>
     <div className="workspace-topbar-identity">
-      <div className="workspace-brand"><span>{section}</span><strong>Razafimamonjy Restaurant</strong></div>
+      <div className="workspace-brand">
+        <span className="workspace-brand-mark"><img src={restaurantLogo} alt="Logo du restaurant Razafimamonjy" /></span>
+        <span className="workspace-brand-section">{section}</span>
+      </div>
       <div className="workspace-account">
         <span className="workspace-user">{userName || 'Utilisateur'}</span>
         <button type="button" onClick={onPasswordChange}>Mot de passe</button>

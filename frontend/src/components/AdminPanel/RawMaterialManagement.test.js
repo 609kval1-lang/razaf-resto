@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { adminAPI } from '../../services/api';
+import DataTable from '../common/DataTable';
 import RawMaterialManagement from './RawMaterialManagement';
 
 const mockConfirm = jest.fn();
@@ -10,7 +11,7 @@ jest.mock('../../services/api', () => ({ adminAPI: {
   getRawMaterials: jest.fn(), getSuppliers: jest.fn(), getRawMaterialPriceVariations: jest.fn(),
   getTreasurySnapshot: jest.fn(), createRawMaterial: jest.fn(), createSupplierPurchase: jest.fn(),
 } }));
-jest.mock('../common/DataTable', () => () => null);
+jest.mock('../common/DataTable', () => jest.fn(() => null));
 jest.mock('../common/DialogProvider', () => ({ useDialog: () => ({ confirm: mockConfirm }) }));
 jest.mock('../common/ToastProvider', () => ({ useToast: () => ({ showToast: jest.fn() }) }));
 
@@ -23,6 +24,24 @@ beforeEach(() => {
   adminAPI.createRawMaterial.mockResolvedValue({ data: {} });
   adminAPI.createSupplierPurchase.mockResolvedValue({ data: {} });
   mockConfirm.mockResolvedValue(true);
+});
+
+test('keeps stock actions first and folds portion details into the compact table', async () => {
+  adminAPI.getRawMaterials.mockResolvedValue({ data: [{
+    id: 4, name: 'Farine', unit: 'kg', stock: 2, cost: 100, reorder_level: 1,
+    suppliers: [{ id: 1, name: 'Supplier' }], available_portions_total: 4,
+    ingredients: [{ id: 2, name: 'Pâte', quantity_available: 4 }],
+  }] });
+  render(<RawMaterialManagement />);
+  await waitFor(() => expect(DataTable).toHaveBeenCalledWith(expect.objectContaining({ className: 'raw-material-table' }), undefined));
+  const { columns, data } = DataTable.mock.calls.find(([props]) => props.className === 'raw-material-table')[0];
+  expect(columns.map((column) => column.key)).toEqual(['actions', 'name', 'stock', 'cost', 'available_portions_total']);
+  const actions = render(columns[0].render(data[0]));
+  expect(actions.getByRole('button', { name: 'Acheter' })).toBeInTheDocument();
+  expect(actions.getByRole('button', { name: 'Modifier' })).toBeInTheDocument();
+  actions.unmount();
+  const portions = render(columns[4].render(data[0]));
+  expect(portions.getByText('Jusqu\'à 4 portion(s)').closest('details')).not.toHaveAttribute('open');
 });
 
 test('records an existing-material purchase with an explicit cost decision and no duplicate payment', async () => {

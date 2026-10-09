@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getHomePathForRole } from '../utils/roleRoutes';
+import restaurantLogo from '../restaurant-logo.jpg';
 import './Login.css';
 import './common/RestaurantWorkspace.css';
 
@@ -53,7 +54,7 @@ const Login = () => {
     <div className="login-container restaurant-workspace">
       <div className="login-card">
         <div className="login-header">
-          <h1>Razafimamonjy Restaurant</h1>
+          <img className="login-logo" src={restaurantLogo} alt="Logo du restaurant Razafimamonjy" />
           <h2>Connexion</h2>
         </div>
 

@@ -96,6 +96,70 @@ class CashMovementController extends Controller
         ));
     }
 
+    public function adminMovementHistory(Request $request)
+    {
+        $validated = $request->validate([
+            'flow' => ['nullable', Rule::in(['all', 'customer', 'supplier', 'employee', 'transfer', 'treasury_withdrawal', 'cash_withdrawal'])],
+            'account' => ['nullable', Rule::in(array_merge(['all'], CashMovement::treasuryAccounts()))],
+            'search' => ['nullable', 'string', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $query = CashMovement::query()->with([
+            'requestedBy:id,name',
+            'approvedBy:id,name',
+            'order.customer:id,name',
+            'order.table:id,table_number',
+            'payment:id,order_id,status,method,settlement_method,reference',
+            'payment.order.customer:id,name',
+            'payment.order.table:id,table_number',
+        ]);
+
+        $flowTypes = [
+            'supplier' => ['supplier_payment'],
+            'employee' => ['employee_advance_payment', 'employee_salary_payment'],
+            'transfer' => ['treasury_transfer'],
+            'treasury_withdrawal' => ['treasury_withdrawal'],
+            'cash_withdrawal' => ['cash_withdrawal_request', 'cash_withdrawal'],
+        ];
+        $flow = $validated['flow'] ?? 'all';
+        if ($flow === 'customer') {
+            $query->where(function ($customerQuery) {
+                $customerQuery->whereIn('flow_type', ['customer_payment', 'customer_voucher_settlement', 'reservation_deposit'])
+                    ->orWhere(function ($legacyQuery) {
+                        $legacyQuery->whereNull('flow_type')->whereNotNull('payment_id')->where('direction', 'in');
+                    });
+            });
+        } elseif (isset($flowTypes[$flow])) {
+            $query->whereIn('flow_type', $flowTypes[$flow]);
+        }
+
+        $account = $validated['account'] ?? 'all';
+        if ($account !== 'all') {
+            $query->where(function ($accountQuery) use ($account) {
+                $accountQuery->where('source_account', $account)
+                    ->orWhere('destination_account', $account);
+            });
+        }
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        if ($search !== '') {
+            $query->where(function ($searchQuery) use ($search) {
+                $searchQuery->where('description', 'like', "%{$search}%")
+                    ->orWhere('reason', 'like', "%{$search}%")
+                    ->orWhere('flow_type', 'like', "%{$search}%")
+                    ->orWhereHas('order.customer', fn ($customerQuery) => $customerQuery->where('name', 'like', "%{$search}%"))
+                    ->orWhereHas('payment.order.customer', fn ($customerQuery) => $customerQuery->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        return response()->json($query
+            ->orderByRaw('COALESCE(approved_at, created_at) DESC')
+            ->orderByDesc('id')
+            ->paginate(20)
+            ->through(fn (CashMovement $movement) => $this->formatMovement($movement)));
+    }
+
     public function adminApprove(Request $request, CashMovement $movement)
     {
         $validated = $request->validate([
@@ -363,6 +427,11 @@ class CashMovementController extends Controller
             ->with([
                 'requestedBy:id,name',
                 'approvedBy:id,name',
+                'order.customer:id,name',
+                'order.table:id,table_number',
+                'payment:id,order_id,status,method,settlement_method,reference',
+                'payment.order.customer:id,name',
+                'payment.order.table:id,table_number',
             ])
             ->orderByDesc('id');
 
@@ -579,14 +648,18 @@ class CashMovementController extends Controller
         $flowLabels = CashMovement::flowTypeLabels();
         $effectiveAt = $movement->approved_at ?? $movement->created_at;
         $metadata = is_array($movement->metadata) ? $movement->metadata : [];
+        $order = $movement->order ?? $movement->payment?->order;
+        $flowType = $movement->flow_type ?: (
+            $movement->payment_id && $movement->direction === 'in' ? 'customer_payment' : null
+        );
 
         return [
             'id' => (int) $movement->id,
             'direction' => (string) $movement->direction,
             'status' => (string) $movement->status,
             'movement_type' => (string) ($movement->movement_type ?: $movement->inferMovementType()),
-            'flow_type' => $movement->flow_type,
-            'flow_type_label' => $movement->flow_type ? ($flowLabels[$movement->flow_type] ?? $movement->flow_type) : null,
+            'flow_type' => $flowType,
+            'flow_type_label' => $flowType ? ($flowLabels[$flowType] ?? $flowType) : null,
             'amount' => round((float) $movement->amount, 2),
             'payment_method' => $movement->payment_method,
             'source_account' => $movement->source_account,
@@ -600,7 +673,11 @@ class CashMovementController extends Controller
             'approved_by_user_id' => $movement->approved_by_user_id,
             'approved_by_name' => $movement->approvedBy?->name,
             'payment_id' => $movement->payment_id,
-            'order_id' => $movement->order_id,
+            'order_id' => $movement->order_id ?? $order?->id,
+            'customer_name' => $order?->customer?->name,
+            'table_number' => $order?->table?->table_number,
+            'order_type' => $order?->order_type,
+            'payment_reference' => $movement->payment?->reference,
             'supplier_purchase_id' => $movement->supplier_purchase_id,
             'supplier_purchase_payment_id' => $movement->supplier_purchase_payment_id,
             'metadata' => $metadata,

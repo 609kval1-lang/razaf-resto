@@ -123,6 +123,23 @@ test('reservation-locked tables cannot be selected', async () => {
   expect(await screen.findByRole('button', { name: 'Selectionner la table 3' })).toBeDisabled();
 });
 
+test('shows tables in batches while keeping search and selection available', async () => {
+  cashierAPI.getOrderEntryTables.mockResolvedValue({ data: Array.from({ length: 15 }, (_, index) => ({
+    id: index + 1, table_number: index + 1, capacity: 4, status: 'free',
+  })) });
+  render(<CashierOrdersModule />);
+  await screen.findByRole('button', { name: 'Selectionner la table 1' });
+  expect(screen.getAllByRole('button', { name: /Selectionner la table/ })).toHaveLength(12);
+  expect(screen.queryByRole('button', { name: 'Selectionner la table 15' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Afficher 12 tables suivantes' }));
+  expect(screen.getAllByRole('button', { name: /Selectionner la table/ })).toHaveLength(15);
+  fireEvent.change(screen.getByLabelText('Rechercher une table'), { target: { value: '15' } });
+  expect(screen.getAllByRole('button', { name: /Selectionner la table/ })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Selectionner la table 15' }));
+  await screen.findByRole('button', { name: 'Ajouter Riz poulet' });
+  expect(screen.getByRole('heading', { name: 'Table 15' })).toBeInTheDocument();
+});
+
 test('limits the basket according to shared raw stock and keeps quantity reductions available', async () => {
   render(<CashierOrdersModule />);
   await chooseTable();

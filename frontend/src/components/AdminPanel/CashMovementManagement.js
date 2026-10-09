@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import useSerializedAsyncCallback from '../../hooks/useSerializedAsyncCallback';
-import { formatPaymentMethodLabel } from '../../utils/paymentMethods';
 import DataTable from '../common/DataTable';
 
 const formatCurrency = (value) => {
@@ -44,12 +43,6 @@ const statusLabel = (status) => {
   };
 
   return labels[status] || status;
-};
-
-const directionLabel = (direction) => {
-  if (direction === 'in') return 'Entree';
-  if (direction === 'out') return 'Sortie';
-  return direction || '-';
 };
 
 const renderMovementDetails = (movement, { preferReason = false } = {}) => {
@@ -102,7 +95,6 @@ const CashMovementManagement = () => {
   const [summary, setSummary] = useState(defaultSummary);
   const [revenue, setRevenue] = useState(defaultRevenue);
   const [pending, setPending] = useState([]);
-  const [movements, setMovements] = useState([]);
 
   const loadDataInternal = useCallback(async (options = {}) => {
     const { silent = false } = options || {};
@@ -122,7 +114,6 @@ const CashMovementManagement = () => {
       setSummary(data.summary || defaultSummary);
       setRevenue(data.revenue_breakdown_today || defaultRevenue);
       setPending(Array.isArray(data.pending_withdrawals) ? data.pending_withdrawals : []);
-      setMovements(Array.isArray(data.movements) ? data.movements : []);
     } catch (error) {
       setMessage(`Erreur: ${extractErrorMessage(error, 'Impossible de charger les mouvements de caisse')}`);
     } finally {
@@ -255,77 +246,6 @@ const CashMovementManagement = () => {
     },
   ];
 
-  const movementColumns = [
-    {
-      key: 'id',
-      header: '#',
-      sortType: 'number',
-      sortAccessor: (movement) => Number(movement.id || 0),
-      searchAccessor: (movement) => String(movement.id || ''),
-      render: (movement) => `#${movement.id}`,
-    },
-    {
-      key: 'flow_type',
-      header: 'Flux',
-      sortAccessor: (movement) => movement.flow_type_label || directionLabel(movement.direction),
-      searchAccessor: (movement) => `${movement.flow_type_label || ''} ${directionLabel(movement.direction)}`,
-      render: (movement) => movement.flow_type_label || directionLabel(movement.direction),
-    },
-    {
-      key: 'amount',
-      header: 'Montant',
-      sortType: 'number',
-      sortAccessor: (movement) => Number(movement.amount || 0),
-      searchAccessor: (movement) => String(movement.amount || ''),
-      render: (movement) => formatCurrency(movement.amount),
-    },
-    {
-      key: 'payment_method',
-      header: 'Mode',
-      sortAccessor: (movement) => formatPaymentMethodLabel(movement.payment_method || ''),
-      searchAccessor: (movement) => formatPaymentMethodLabel(movement.payment_method || ''),
-      render: (movement) => formatPaymentMethodLabel(movement.payment_method || '-'),
-    },
-    {
-      key: 'description',
-      header: 'Motif / Description',
-      sortAccessor: (movement) => movement.reason || movement.description || '',
-      searchAccessor: (movement) => `${movement.reason || ''} ${movement.description || ''}`,
-      render: (movement) => renderMovementDetails(movement, { preferReason: true }),
-    },
-    {
-      key: 'requested_by_name',
-      header: 'Demandeur',
-      sortAccessor: (movement) => movement.requested_by_name || '',
-      searchAccessor: (movement) => movement.requested_by_name || '',
-      render: (movement) => movement.requested_by_name || '-',
-    },
-    {
-      key: 'status',
-      header: 'Validation',
-      sortAccessor: (movement) => statusLabel(movement.status),
-      searchAccessor: (movement) => `${statusLabel(movement.status)} ${movement.approved_by_name || ''}`,
-      render: (movement) => (
-        <>
-          <span className={`cash-movement-status ${movement.status || 'pending'}`}>
-            {statusLabel(movement.status)}
-          </span>
-          {movement.approved_by_name ? (
-            <div className="form-hint">Par: {movement.approved_by_name}</div>
-          ) : null}
-        </>
-      ),
-    },
-    {
-      key: 'effective_at',
-      header: 'Date validation',
-      sortType: 'date',
-      sortAccessor: (movement) => movement.effective_at || movement.created_at,
-      searchAccessor: (movement) => formatDateTime(movement.effective_at || movement.created_at),
-      render: (movement) => formatDateTime(movement.effective_at || movement.created_at),
-    },
-  ];
-
   if (loading) {
     return <div className="loading">Chargement des mouvements de caisse...</div>;
   }
@@ -343,6 +263,9 @@ const CashMovementManagement = () => {
             </button>
             <Link className="btn btn-secondary" to="/admin/treasury">
               Ouvrir Trésorerie
+            </Link>
+            <Link className="btn btn-secondary" to="/admin/histories?view=treasury&account=cash">
+              Historiques caisse
             </Link>
           </div>
         </div>
@@ -400,21 +323,6 @@ const CashMovementManagement = () => {
             rowKey="id"
             searchPlaceholder="Rechercher une demande (motif, demandeur, statut)..."
             initialSort={{ key: 'created_at', direction: 'desc' }}
-          />
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Historique caisse</h3>
-        {movements.length === 0 ? (
-          <div className="alert-empty">Aucun mouvement de caisse.</div>
-        ) : (
-          <DataTable
-            columns={movementColumns}
-            data={movements}
-            rowKey="id"
-            searchPlaceholder="Rechercher un mouvement (type, motif, description, demandeur)..."
-            initialSort={{ key: 'effective_at', direction: 'desc' }}
           />
         )}
       </div>

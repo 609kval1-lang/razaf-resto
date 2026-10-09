@@ -54,6 +54,8 @@ jest.mock('./EmployeePayrollManagement', () => () => <div>Page paie</div>);
 jest.mock('./CashMovementManagement', () => () => <div>Page caisse admin</div>);
 jest.mock('./RevenueDashboard', () => () => <div>Page recettes</div>);
 jest.mock('./TreasuryManagement', () => () => <div>Page trésorerie</div>);
+jest.mock('./AdminHelp', () => () => <div>Page aide</div>);
+jest.mock('./AdminHistories', () => () => <div>Page historiques</div>);
 
 const renderAdmin = (initialPath = '/admin') => render(
   <MemoryRouter initialEntries={[initialPath]}>
@@ -74,6 +76,12 @@ test('keeps admin pages reachable from the shared navigation', async () => {
   fireEvent.click(screen.getByRole('link', { name: 'Finance' }));
   fireEvent.click(screen.getByRole('link', { name: 'Trésorerie multi-comptes' }));
   expect(await screen.findByText('Page trésorerie')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('link', { name: 'Historiques' }));
+  expect(await screen.findByText('Page historiques')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('link', { name: 'Aide' }));
+  expect(await screen.findByText('Page aide')).toBeInTheDocument();
 });
 
 test('switches admin pages when selecting a top-level section', async () => {

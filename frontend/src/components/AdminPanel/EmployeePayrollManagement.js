@@ -1,19 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import useSerializedAsyncCallback from '../../hooks/useSerializedAsyncCallback';
 import DataTable from '../common/DataTable';
-import { formatPaymentMethodLabel, PAYMENT_METHOD_OPTIONS, normalizePaymentMethod } from '../../utils/paymentMethods';
+import { PAYMENT_METHOD_OPTIONS, normalizePaymentMethod } from '../../utils/paymentMethods';
 
 const ACCOUNT_LABELS = {
   cash: 'Caisse',
   safe: 'Coffre',
   bank: 'Banque',
   mobile_money: 'Mobile Money',
-};
-
-const TRANSACTION_TYPE_LABELS = {
-  advance: 'Avance sur salaire',
-  salary_payment: 'Paiement salaire',
 };
 
 const ROLE_JOB_LABELS = {
@@ -55,19 +51,6 @@ const formatDate = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString('fr-FR');
-};
-
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
-  return date.toLocaleString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 };
 
 const getTodayDateInputValue = () => {
@@ -195,7 +178,6 @@ const EmployeePayrollManagement = () => {
   const [savingAdvance, setSavingAdvance] = useState(false);
   const [savingSalaryPayment, setSavingSalaryPayment] = useState(false);
   const [activePayrollAction, setActivePayrollAction] = useState('advance');
-  const [transactionHistoryFilter, setTransactionHistoryFilter] = useState('all');
   const managedEmployeeHeadingRef = useRef(null);
   const managedEmployeeScrollPendingRef = useRef(false);
   const previousSelectedEmployeeIdRef = useRef(null);
@@ -281,7 +263,6 @@ const EmployeePayrollManagement = () => {
   }, [loadSnapshot]);
 
   const employees = useMemo(() => snapshot.employees || [], [snapshot.employees]);
-  const transactions = useMemo(() => snapshot.transactions || [], [snapshot.transactions]);
   const selectedEmployee = useMemo(
     () => employees.find((employee) => employee.id === selectedEmployeeId) || null,
     [employees, selectedEmployeeId]
@@ -296,7 +277,6 @@ const EmployeePayrollManagement = () => {
     setAdvanceForm(buildAdvanceForm());
     setSalaryPaymentForm(buildSalaryPaymentForm(selectedEmployee));
     setActivePayrollAction('advance');
-    setTransactionHistoryFilter('all');
     previousSelectedEmployeeIdRef.current = selectedEmployeeId;
   }, [selectedEmployeeId, selectedEmployee]);
 
@@ -326,29 +306,6 @@ const EmployeePayrollManagement = () => {
       }));
     });
   }, [cashSourceOptions, paymentMethodOptions]);
-
-  const selectedEmployeeTransactions = useMemo(() => {
-    if (!selectedEmployeeId) return transactions;
-    return transactions.filter((transaction) => transaction.user_id === selectedEmployeeId);
-  }, [selectedEmployeeId, transactions]);
-
-  const filteredTransactionHistory = useMemo(() => {
-    if (transactionHistoryFilter === 'advance') {
-      return selectedEmployeeTransactions.filter((transaction) => transaction.transaction_type === 'advance');
-    }
-
-    if (transactionHistoryFilter === 'salary_payment') {
-      return selectedEmployeeTransactions.filter((transaction) => transaction.transaction_type === 'salary_payment');
-    }
-
-    return selectedEmployeeTransactions;
-  }, [selectedEmployeeTransactions, transactionHistoryFilter]);
-
-  const transactionHistoryCounts = useMemo(() => ({
-    all: selectedEmployeeTransactions.length,
-    advance: selectedEmployeeTransactions.filter((transaction) => transaction.transaction_type === 'advance').length,
-    salary_payment: selectedEmployeeTransactions.filter((transaction) => transaction.transaction_type === 'salary_payment').length,
-  }), [selectedEmployeeTransactions]);
 
   const monthlySalaryAmount = Number(selectedEmployee?.monthly_salary || 0);
   const salaryCoveredThisMonth = Number(selectedEmployee?.salary_covered_this_month || 0);
@@ -458,75 +415,6 @@ const EmployeePayrollManagement = () => {
           {employee.id === selectedEmployeeId ? 'Sélectionné' : 'Gérer'}
         </button>
       ),
-    },
-  ];
-
-  const transactionColumns = [
-    {
-      key: 'paid_at',
-      header: 'Date',
-      sortType: 'date',
-      sortAccessor: (transaction) => transaction.paid_at || transaction.created_at,
-      searchAccessor: (transaction) => `${formatDateTime(transaction.paid_at)} ${formatDateTime(transaction.created_at)}`,
-      render: (transaction) => formatDateTime(transaction.paid_at || transaction.created_at),
-    },
-    {
-      key: 'employee_name',
-      header: 'Employé',
-      sortAccessor: (transaction) => transaction.employee_name || '',
-      searchAccessor: (transaction) => `${transaction.employee_name || ''} ${resolveDisplayedJobTitle(transaction)}`,
-      render: (transaction) => (
-        <div className="cash-movement-detail">
-          <strong>{transaction.employee_name}</strong>
-          <span>{resolveDisplayedJobTitle(transaction)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'transaction_type',
-      header: 'Type',
-      sortAccessor: (transaction) => TRANSACTION_TYPE_LABELS[transaction.transaction_type] || transaction.transaction_type,
-      searchAccessor: (transaction) => TRANSACTION_TYPE_LABELS[transaction.transaction_type] || transaction.transaction_type,
-      render: (transaction) => TRANSACTION_TYPE_LABELS[transaction.transaction_type] || transaction.transaction_type,
-    },
-    {
-      key: 'amounts',
-      header: 'Montants',
-      sortType: 'number',
-      sortAccessor: (transaction) => Number(transaction.net_amount || 0),
-      searchAccessor: (transaction) => `${transaction.gross_amount || ''} ${transaction.advance_deduction_amount || ''} ${transaction.net_amount || ''}`,
-      render: (transaction) => (
-        <div className="cash-movement-detail">
-          <strong>Net: {formatCurrency(transaction.net_amount)}</strong>
-          <span>Brut: {formatCurrency(transaction.gross_amount)}</span>
-          {Number(transaction.advance_deduction_amount || 0) > 0 ? (
-            <span>Avance déduite: {formatCurrency(transaction.advance_deduction_amount)}</span>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'payment',
-      header: 'Paiement',
-      sortAccessor: (transaction) => `${transaction.payment_method || ''} ${transaction.source_account || ''}`,
-      searchAccessor: (transaction) => `${transaction.payment_method || ''} ${transaction.source_account || ''} ${transaction.reference || ''}`,
-      render: (transaction) => (
-        <div className="cash-movement-detail">
-          <strong>{transaction.payment_method ? formatPaymentMethodLabel(transaction.payment_method) : 'Aucun décaissement'}</strong>
-          <span>Compte: {transaction.source_account ? (ACCOUNT_LABELS[transaction.source_account] || transaction.source_account) : 'Aucun'}</span>
-          <span>
-            Mouvement trésorerie: {transaction.cash_movement_id ? `#${transaction.cash_movement_id}` : 'Aucun (net à 0)'}
-          </span>
-          <span>Référence: {transaction.reference || '-'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'payroll_month',
-      header: 'Mois paie',
-      sortAccessor: (transaction) => transaction.payroll_month || '',
-      searchAccessor: (transaction) => transaction.payroll_month || '',
-      render: (transaction) => transaction.payroll_month ? formatDate(transaction.payroll_month) : '-',
     },
   ];
 
@@ -688,6 +576,7 @@ const EmployeePayrollManagement = () => {
                 </p>
               </div>
               <div className="actions">
+                <Link className="btn btn-secondary btn-sm" to={`/admin/histories?view=payroll&employee=${selectedEmployee.id}`}>Historiques</Link>
                 <span className={`role-badge ${selectedEmployee.has_system_access ? 'role-admin' : 'role-employee'}`}>
                   {selectedEmployee.has_system_access ? 'Accès écran' : 'Sans accès'}
                 </span>
@@ -992,50 +881,6 @@ const EmployeePayrollManagement = () => {
             </form>
           </div>
 
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '10px' }}>
-              <div>
-                <h3 style={{ marginBottom: '6px' }}>Historique</h3>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${transactionHistoryFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setTransactionHistoryFilter('all')}
-                >
-                  Tout ({transactionHistoryCounts.all})
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${transactionHistoryFilter === 'advance' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setTransactionHistoryFilter('advance')}
-                >
-                  Avances ({transactionHistoryCounts.advance})
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${transactionHistoryFilter === 'salary_payment' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setTransactionHistoryFilter('salary_payment')}
-                >
-                  Salaires ({transactionHistoryCounts.salary_payment})
-                </button>
-              </div>
-            </div>
-            <DataTable
-              columns={transactionColumns}
-              data={filteredTransactionHistory}
-              rowKey="id"
-              searchPlaceholder="Rechercher une avance ou un paiement salaire..."
-              initialSort={{ key: 'paid_at', direction: 'desc' }}
-              emptyMessage={
-                transactionHistoryFilter === 'advance'
-                  ? 'Aucune avance enregistrée pour cet employé.'
-                  : transactionHistoryFilter === 'salary_payment'
-                    ? 'Aucun paiement salaire enregistré pour cet employé.'
-                    : 'Aucune transaction de paie pour cet employé.'
-              }
-            />
-          </div>
         </>
       ) : (
         <div className="card">

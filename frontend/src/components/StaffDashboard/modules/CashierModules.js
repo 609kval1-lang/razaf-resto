@@ -6,6 +6,7 @@ import { PAYMENT_METHOD_OPTIONS, formatPaymentMethodLabel, normalizePaymentMetho
 import { isWholeAriary } from '../../../utils/ariary';
 import { calculateCashTender } from '../../../utils/cashTender';
 import CashTenderFields from '../../common/CashTenderFields';
+import restaurantLogo from '../../../restaurant-logo.jpg';
 import './CashierPayments.css';
 import { useToast } from '../../common/ToastProvider';
 
@@ -355,6 +356,13 @@ const buildInvoiceHtml = (invoice) => {
             width: var(--content-width);
             margin: 0 auto;
           }
+          .receipt-logo {
+            display: block;
+            width: 48mm;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto 2mm;
+          }
           h1 {
             margin: 0;
             text-align: center;
@@ -429,7 +437,7 @@ const buildInvoiceHtml = (invoice) => {
       </head>
       <body>
         <div class="receipt">
-          <h1>Razafimamonjy Restaurant</h1>
+          <img class="receipt-logo" src="${escapeHtml(restaurantLogo)}" alt="Logo du restaurant Razafimamonjy" />
           <div class="receipt-subtitle">${escapeHtml(documentLabel)} commande #${escapeHtml(invoice.order_id)}</div>
           <div class="receipt-subtitle">${escapeHtml(printedAt)}</div>
 

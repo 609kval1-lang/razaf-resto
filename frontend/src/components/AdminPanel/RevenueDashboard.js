@@ -764,7 +764,6 @@ const RevenueDashboard = () => {
             <p>Net, cocktails inclus</p>
           </div>
         </div>
-        <p className="form-hint revenue-reconciliation">Plats + boissons = recettes nettes. Les remises ne créent pas de mouvement de caisse : seuls les montants réellement encaissés alimentent les comptes.</p>
       </div>
 
       {message ? (
@@ -805,7 +804,6 @@ const RevenueDashboard = () => {
 
       <div className="card">
         <h3>Impact coûts menus et décision de prix</h3>
-        <p className="form-hint">Le coût de référence évolue après votre choix à l'achat ; les prix des menus ne changent jamais automatiquement.</p>
         <div className="revenue-filter-grid revenue-impact-filters" aria-label="Filtres des coûts des menus">
           <label className="form-group"><span>Famille</span><select value={impactCategory} onChange={(event) => setImpactCategory(event.target.value)}>
             <option value="all">Plats et boissons</option>
@@ -863,7 +861,6 @@ const RevenueDashboard = () => {
                 <span>Bénéfice / coût au prix choisi</span>
                 <strong>{projectedProfitOnCost === null ? 'Non calculable' : `${projectedProfitOnCost.toFixed(1)}%`}</strong>
               </div>
-              <p className="form-hint">Le nouveau prix s'applique aux prochaines commandes uniquement.</p>
 
               <div className="form-actions">
                 <button

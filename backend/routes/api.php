@@ -59,6 +59,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/admin/cash-movements', [CashMovementController::class, 'adminIndex']);
         Route::get('/admin/treasury', [CashMovementController::class, 'adminTreasuryIndex']);
+        Route::get('/admin/treasury/history', [CashMovementController::class, 'adminMovementHistory']);
         Route::post('/admin/treasury/transfers', [CashMovementController::class, 'adminStoreTransfer']);
         Route::post('/admin/treasury/withdrawals', [CashMovementController::class, 'adminStoreAccountWithdrawal']);
         Route::post('/admin/orders/{order}/payment', [CashierController::class, 'processPayment']);

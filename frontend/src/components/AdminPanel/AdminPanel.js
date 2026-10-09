@@ -12,6 +12,8 @@ import EmployeePayrollManagement from './EmployeePayrollManagement';
 import CashMovementManagement from './CashMovementManagement';
 import RevenueDashboard from './RevenueDashboard';
 import TreasuryManagement from './TreasuryManagement';
+import AdminHelp from './AdminHelp';
+import AdminHistories from './AdminHistories';
 import ChangePasswordModal from '../common/ChangePasswordModal';
 import WorkspaceHeader from '../common/WorkspaceHeader';
 import './AdminPanel.css';
@@ -52,24 +54,11 @@ const navigationGroups = [
       { id: 'revenue', label: 'Recettes et analyses', path: '/admin/revenue' },
       { id: 'treasury', label: 'Trésorerie multi-comptes', path: '/admin/treasury' },
       { id: 'cash-movements', label: 'Caisse: demandes et validation', path: '/admin/cash-movements' },
+      { id: 'histories', label: 'Historiques', path: '/admin/histories' },
     ],
   },
+  { path: '/admin/help', label: 'Aide' },
 ];
-
-const getDashboardStockStatus = (stock, reorderLevel) => {
-  const value = Number(stock || 0);
-  const threshold = Number(reorderLevel || 0);
-
-  if (threshold <= 0) {
-    return value <= 0 ? 'low' : 'good';
-  }
-
-  const ratio = (value / threshold) * 100;
-
-  if (ratio < 75) return 'low';
-  if (ratio <= 100) return 'warning';
-  return 'good';
-};
 
 const formatAr = (value) => {
   const amount = Number(value || 0);
@@ -123,6 +112,8 @@ const AdminPanel = () => {
           <Route path="/revenue" element={<RevenueDashboard />} />
           <Route path="/treasury" element={<TreasuryManagement />} />
           <Route path="/cash-movements" element={<CashMovementManagement />} />
+          <Route path="/histories" element={<AdminHistories />} />
+          <Route path="/help" element={<AdminHelp />} />
         </Routes>
       </main>
 

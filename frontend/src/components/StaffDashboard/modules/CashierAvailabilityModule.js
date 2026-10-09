@@ -3,6 +3,8 @@ import { cashierAPI } from '../../../services/api';
 import { menuAvailabilityLabel, menuAvailabilityState, menuCategoryLabel, normalizeCashierSearch } from '../../../utils/cashierDisplay';
 import './CashierWorkspace.css';
 
+const VISIBLE_BATCH = 12;
+
 export const CashierAvailabilityModule = () => {
   const [snapshot, setSnapshot] = useState(null);
   const [error, setError] = useState('');
@@ -11,6 +13,7 @@ export const CashierAvailabilityModule = () => {
   const [status, setStatus] = useState('all');
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(VISIBLE_BATCH);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +65,7 @@ export const CashierAvailabilityModule = () => {
   const groups = [...new Set(visible.map((menu) => menu.category || ''))].sort(compareCategories)
     .map((value) => ({ category: value, menus: visible.filter((menu) => (menu.category || '') === value)
       .sort((a, b) => Number(b.is_orderable) - Number(a.is_orderable) || a.name.localeCompare(b.name, 'fr')) }));
+  const orderedMenus = groups.flatMap((group) => group.menus);
   const updatedAt = snapshot?.updated_at ? new Date(snapshot.updated_at) : null;
   const updateLabel = updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt.toLocaleTimeString('fr-FR') : null;
 
@@ -70,12 +74,12 @@ export const CashierAvailabilityModule = () => {
       <header className="cq-availability-toolbar">
         <h2>Disponibilites</h2>
         <div className="cq-availability-controls" aria-label="Filtres des disponibilites">
-          <label className="cq-search"><span className="cq-filter-label">Rechercher un plat</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher un plat..." /></label>
-          <label className="cq-field"><span className="cq-filter-label">Categorie</span><select value={category} onChange={(event) => setCategory(event.target.value)}>
+          <label className="cq-search"><span className="cq-filter-label">Rechercher un plat</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setVisibleLimit(VISIBLE_BATCH); }} placeholder="Rechercher un plat..." /></label>
+          <label className="cq-field"><span className="cq-filter-label">Categorie</span><select value={category} onChange={(event) => { setCategory(event.target.value); setVisibleLimit(VISIBLE_BATCH); }}>
             <option value="">Toutes les categories</option>
             {categories.map((value) => <option key={value} value={value}>{menuCategoryLabel(value)}</option>)}
           </select></label>
-          <label className="cq-field"><span className="cq-filter-label">Disponibilite</span><select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <label className="cq-field"><span className="cq-filter-label">Disponibilite</span><select value={status} onChange={(event) => { setStatus(event.target.value); setVisibleLimit(VISIBLE_BATCH); }}>
             <option value="all">Tous les plats ({counts.all})</option>
             <option value="available">Disponibles ({counts.available})</option>
             <option value="low">Stock faible ({counts.low})</option>
@@ -88,7 +92,7 @@ export const CashierAvailabilityModule = () => {
       </header>
       {error ? <div className="staff-message is-error" role="alert">{error}</div> : null}
       {!snapshot && !error ? <p className="cq-empty" role="status">Chargement des disponibilites...</p> : null}
-      {visible.length > 0 ? <div className="cq-availability-grid">{groups.flatMap((group) => group.menus).map((menu) => <article key={menu.id} aria-label={`Disponibilite de ${menu.name}`} className={`cq-availability-card is-${menuAvailabilityState(menu)}`}>
+      {visible.length > 0 ? <div className="cq-availability-grid">{orderedMenus.slice(0, visibleLimit).map((menu) => <article key={menu.id} aria-label={`Disponibilite de ${menu.name}`} className={`cq-availability-card is-${menuAvailabilityState(menu)}`}>
           <h4 className="cq-dish-name">{menu.name}</h4>
           <div className="cq-capacity"><span className="cq-status">{menuAvailabilityLabel(menu)}</span>
             <strong aria-label="Quantite disponible">{menu.is_orderable ? menu.max_portions_available : '0'}</strong>
@@ -99,6 +103,11 @@ export const CashierAvailabilityModule = () => {
             {!menu.portions?.length ? <p>Aucun ingredient renseigne.</p> : null}
           </details>
         </article>)}</div> : null}
+      {visible.length > VISIBLE_BATCH ? <div className="cq-list-progress">
+        <span>{Math.min(visibleLimit, visible.length)} sur {visible.length} plats affiches</span>
+        {visibleLimit < visible.length ? <button type="button" className="cq-button" onClick={() => setVisibleLimit((limit) => limit + VISIBLE_BATCH)}>Afficher 12 suivants</button> : null}
+        {visibleLimit > VISIBLE_BATCH ? <button type="button" className="cq-button" onClick={() => setVisibleLimit(VISIBLE_BATCH)}>Voir moins</button> : null}
+      </div> : null}
       {snapshot && !visible.length ? <div className="cq-empty"><h3>Aucun plat ne correspond a votre recherche.</h3>
         <button type="button" className="cq-button" onClick={() => { setSearch(''); setCategory(''); setStatus('all'); }}>Reinitialiser les filtres</button>
       </div> : null}

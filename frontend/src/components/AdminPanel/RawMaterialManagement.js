@@ -566,8 +566,8 @@ const RawMaterialManagement = () => {
     }
 
     return (
-      <div className="raw-material-portions">
-        <strong>Jusqu'à {totalAvailablePortions} portion(s)</strong>
+      <details className="raw-material-portions">
+        <summary>Jusqu'à {totalAvailablePortions} portion(s)</summary>
         <div className="raw-material-portions-list">
           {ingredients.map((ingredient) => (
             <span key={`${material.id}-${ingredient.id}`}>
@@ -575,20 +575,34 @@ const RawMaterialManagement = () => {
             </span>
           ))}
         </div>
-      </div>
+      </details>
     );
   };
 
   const rawMaterialColumns = [
     {
+      key: 'actions',
+      header: 'Actions',
+      sortable: false,
+      searchable: false,
+      render: (material) => (
+        <div className="actions raw-material-actions">
+          <button className="btn btn-primary btn-sm" onClick={() => openExistingPurchase(material)}>Acheter</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(material)}>Modifier</button>
+          <button className="btn btn-danger btn-sm" onClick={() => requestDelete(material)}>Supprimer</button>
+        </div>
+      ),
+    },
+    {
       key: 'name',
       header: 'Nom',
       sortAccessor: (material) => material.name,
-      searchAccessor: (material) => `${material.name} ${material.description || ''}`,
+      searchAccessor: (material) => `${material.name} ${material.description || ''} ${(material.suppliers || []).map((supplier) => supplier.name || '').join(' ')}`,
       render: (material) => (
         <>
           <strong>{material.name}</strong>
           {material.description ? <div style={{ fontSize: '0.8em', color: '#666' }}>{material.description}</div> : null}
+          <div className="raw-material-supplier-names">{(material.suppliers || []).map((supplier) => supplier.name).filter(Boolean).join(', ') || 'Sans fournisseur'}</div>
         </>
       ),
     },
@@ -596,42 +610,18 @@ const RawMaterialManagement = () => {
       key: 'stock',
       header: 'Stock',
       sortType: 'number',
-      sortAccessor: (material) => Number(material.stock || 0),
-      searchAccessor: (material) => `${material.stock} ${material.unit}`,
-      render: (material) => `${formatQty(material.stock)} ${material.unit}`,
-    },
-    {
-      key: 'reorder_level',
-      header: 'Seuil limite',
-      sortType: 'number',
-      sortAccessor: (material) => Number(material.reorder_level || 0),
-      searchAccessor: (material) => `${material.reorder_level} ${material.unit}`,
-      render: (material) => `${formatQty(material.reorder_level)} ${material.unit}`,
-    },
-    {
-      key: 'ratio',
-      header: 'Niveau vs seuil',
-      sortType: 'number',
       sortAccessor: (material) => Number(material.ratio || 0),
-      searchAccessor: (material) => `${material.ratio}% ${getStockStatusLabel(material.stockStatus)}`,
+      searchAccessor: (material) => `${material.stock} ${material.unit} ${material.reorder_level} ${material.ratio}% ${getStockStatusLabel(material.stockStatus)}`,
       render: (material) => (
-        <div className="stock-limit-indicator">
-          <div className="stock-limit-track">
-            <div
-              className={`stock-limit-fill ${material.stockStatus}`}
-              style={{ width: `${Math.min(100, material.ratio)}%` }}
-            />
+        <div className="raw-material-stock-cell">
+          <strong>{formatQty(material.stock)} {material.unit}</strong>
+          <span className={`stock-status ${material.stockStatus}`}>{getStockStatusLabel(material.stockStatus)}</span>
+          <div className="stock-limit-indicator">
+            <div className="stock-limit-track"><div className={`stock-limit-fill ${material.stockStatus}`} style={{ width: `${Math.min(100, material.ratio)}%` }} /></div>
+            <small>Seuil : {formatQty(material.reorder_level)} {material.unit}</small>
           </div>
-          <small>{material.ratio.toFixed(0)}% du seuil</small>
         </div>
       ),
-    },
-    {
-      key: 'unit',
-      header: 'Unité',
-      sortAccessor: (material) => material.unit,
-      searchAccessor: (material) => material.unit,
-      render: (material) => material.unit,
     },
     {
       key: 'cost',
@@ -651,56 +641,6 @@ const RawMaterialManagement = () => {
         return `${material.available_portions_total || 0} ${ingredients.map((ingredient) => `${ingredient.name} ${ingredient.quantity_available || 0}`).join(' ')}`;
       },
       render: (material) => renderAvailablePortions(material),
-    },
-    {
-      key: 'suppliers',
-      header: 'Fournisseurs',
-      sortAccessor: (material) => (
-        Array.isArray(material.suppliers)
-          ? material.suppliers.map((supplier) => supplier?.name).filter(Boolean).join(', ')
-          : ''
-      ),
-      searchAccessor: (material) => (
-        Array.isArray(material.suppliers)
-          ? material.suppliers.map((supplier) => supplier?.name).filter(Boolean).join(' ')
-          : ''
-      ),
-      render: (material) => {
-        const supplierNames = Array.isArray(material.suppliers)
-          ? material.suppliers.map((supplier) => supplier?.name).filter(Boolean)
-          : [];
-        return supplierNames.length > 0 ? supplierNames.join(', ') : '-';
-      },
-    },
-    {
-      key: 'status',
-      header: 'Statut brut',
-      sortAccessor: (material) => getStockStatusLabel(material.stockStatus),
-      searchAccessor: (material) => getStockStatusLabel(material.stockStatus),
-      render: (material) => (
-        <span className={`stock-status ${material.stockStatus}`}>
-          {getStockStatusLabel(material.stockStatus)}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      sortable: false,
-      searchable: false,
-      render: (material) => (
-        <div className="actions">
-          <button className="btn btn-primary btn-sm" onClick={() => openExistingPurchase(material)}>
-            Acheter
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(material)}>
-            Modifier
-          </button>
-          <button className="btn btn-danger btn-sm" onClick={() => requestDelete(material)}>
-            Supprimer
-          </button>
-        </div>
-      ),
     },
   ];
 
@@ -1122,11 +1062,12 @@ const RawMaterialManagement = () => {
         )}
 
         <DataTable
+          className="raw-material-table"
           columns={rawMaterialColumns}
           data={materialsWithMeta}
           rowKey="id"
           searchPlaceholder="Rechercher une matière (nom, fournisseur, statut, unité, portions)..."
-          initialSort={{ key: 'ratio', direction: 'asc' }}
+          initialSort={{ key: 'stock', direction: 'asc' }}
           emptyMessage="Aucune matière première trouvée."
         />
       </div>
@@ -1165,9 +1106,6 @@ const RawMaterialManagement = () => {
                   <option value="">Choisir un fournisseur</option>
                   {existingPurchaseSuggestedSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
                 </select>
-                {selectedExistingPurchaseSupplier && selectedExistingPurchaseMaterial ? (
-                  <span className="form-hint">L'achat liera ce fournisseur à la matière si nécessaire.</span>
-                ) : null}
               </div>
               <div className="form-group">
                 <label htmlFor="purchase-quantity">Quantité ({selectedExistingPurchaseMaterial?.unit || 'unité'})</label>
@@ -1238,7 +1176,7 @@ const RawMaterialManagement = () => {
               <span>Utiliser le prix d'achat comme nouveau coût de référence pour les ingrédients et les marges</span>
             </label>
             {selectedExistingPurchaseMaterial ? (
-              <p className="form-hint">Coût de référence actuel : {formatAr(selectedExistingPurchaseMaterial.cost)} / {selectedExistingPurchaseMaterial.unit}. Le prix de vente des plats ne change pas.</p>
+              <p className="form-hint">Coût de référence actuel : {formatAr(selectedExistingPurchaseMaterial.cost)} / {selectedExistingPurchaseMaterial.unit}.</p>
             ) : null}
             <div className="admin-purchase-totals" aria-live="polite">
               <span>Total achat : <strong>{formatAr(existingPurchaseTotal)}</strong></span>

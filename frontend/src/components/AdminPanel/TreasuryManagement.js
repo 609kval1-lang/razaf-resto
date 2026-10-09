@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { adminAPI } from '../../services/api';
 import useSerializedAsyncCallback from '../../hooks/useSerializedAsyncCallback';
 import { PAYMENT_METHOD_OPTIONS, formatPaymentMethodLabel, normalizePaymentMethod } from '../../utils/paymentMethods';
-import DataTable from '../common/DataTable';
 
 const formatCurrency = (value) => {
   const amount = Number(value || 0);
@@ -36,32 +35,9 @@ const extractErrorMessage = (error, fallbackMessage) => {
   return error?.response?.data?.message || error?.response?.data?.error || fallbackMessage;
 };
 
-const MOVEMENT_TYPE_LABELS = {
-  sale: 'Encaissement',
-  transfer: 'Transfert',
-  withdrawal: 'Retrait',
-};
-
-const STATUS_LABELS = {
-  pending: 'En attente',
-  completed: 'Payé',
-  approved: 'Valide',
-  rejected: 'Refuse',
-};
-
 const ACCOUNT_ORDER = ['cash', 'safe', 'bank', 'mobile_money'];
 const IMMEDIATE_PAYMENT_METHOD_OPTIONS = PAYMENT_METHOD_OPTIONS.filter((option) => option.value !== 'bon');
 const TREASURY_REFRESH_INTERVAL_MS = 5000;
-const MOVEMENT_FLOW_FILTERS = [
-  { value: 'all', label: 'Tous les flux', flowTypes: [] },
-  { value: 'customer', label: 'Clients', flowTypes: ['customer_payment', 'customer_voucher_settlement', 'reservation_deposit'] },
-  { value: 'supplier', label: 'Fournisseurs', flowTypes: ['supplier_payment'] },
-  { value: 'employee', label: 'Employés', flowTypes: ['employee_advance_payment', 'employee_salary_payment'] },
-  { value: 'transfer', label: 'Transferts', flowTypes: ['treasury_transfer'] },
-  { value: 'treasury_withdrawal', label: 'Décaissements admin', flowTypes: ['treasury_withdrawal'] },
-  { value: 'cash_withdrawal', label: 'Sorties caisse', flowTypes: ['cash_withdrawal_request', 'cash_withdrawal'] },
-];
-
 const getTargetAccountLabelForMethod = (method) => {
   const normalizedMethod = normalizePaymentMethod(method);
   if (normalizedMethod === 'cash') return 'Caisse';
@@ -198,14 +174,7 @@ const TreasuryManagement = () => {
   const [activeTreasuryAction, setActiveTreasuryAction] = useState('transfer');
   const [summary, setSummary] = useState(defaultSummary);
   const [config, setConfig] = useState(defaultTreasuryConfig);
-  const [movements, setMovements] = useState([]);
   const [pendingVouchers, setPendingVouchers] = useState([]);
-  const [recentCustomerPayments, setRecentCustomerPayments] = useState([]);
-  const [movementFilters, setMovementFilters] = useState({
-    flow: 'all',
-    account: 'all',
-  });
-  const [showMovementFilters, setShowMovementFilters] = useState(false);
   const [voucherSettlementForms, setVoucherSettlementForms] = useState({});
   const [transferForm, setTransferForm] = useState({
     amount: '',
@@ -240,9 +209,7 @@ const TreasuryManagement = () => {
       const data = response?.data || {};
       setSummary(data.summary || defaultSummary);
       setConfig(data.config || defaultTreasuryConfig);
-      setMovements(Array.isArray(data.movements) ? data.movements : []);
       setPendingVouchers(Array.isArray(data.pending_vouchers) ? data.pending_vouchers : []);
-      setRecentCustomerPayments(Array.isArray(data.recent_customer_payments) ? data.recent_customer_payments : []);
     } catch (error) {
       setMessage(`Erreur: ${extractErrorMessage(error, 'Impossible de charger la trésorerie.')}`);
     } finally {
@@ -364,49 +331,6 @@ const TreasuryManagement = () => {
     return withdrawalReasonOptions.find((option) => option.value === withdrawalForm.reason_category) || null;
   }, [withdrawalForm.reason_category, withdrawalReasonOptions]);
 
-  const movementAccountFilterOptions = useMemo(() => ([
-    { value: 'all', label: 'Tous les comptes' },
-    ...accountOptions.map((account) => ({
-      value: account.key,
-      label: account.label,
-    })),
-  ]), [accountOptions]);
-
-  const filteredMovements = useMemo(() => {
-    const activeFlowFilter = MOVEMENT_FLOW_FILTERS.find((option) => option.value === movementFilters.flow)
-      || MOVEMENT_FLOW_FILTERS[0];
-    const flowTypes = Array.isArray(activeFlowFilter.flowTypes) ? activeFlowFilter.flowTypes : [];
-
-    return movements.filter((movement) => {
-      const matchesFlow = flowTypes.length === 0
-        || flowTypes.includes(String(movement.flow_type || ''));
-
-      const matchesAccount = movementFilters.account === 'all'
-        || String(movement.source_account || '') === movementFilters.account
-        || String(movement.destination_account || '') === movementFilters.account;
-
-      return matchesFlow && matchesAccount;
-    });
-  }, [movementFilters.account, movementFilters.flow, movements]);
-
-  const filteredMovementAmount = useMemo(() => (
-    filteredMovements.reduce((total, movement) => total + Number(movement.amount || 0), 0)
-  ), [filteredMovements]);
-
-  const activeMovementFilterCount = useMemo(() => (
-    [
-      movementFilters.flow !== 'all',
-      movementFilters.account !== 'all',
-    ].filter(Boolean).length
-  ), [movementFilters.account, movementFilters.flow]);
-
-  const resetMovementFilters = () => {
-    setMovementFilters({
-      flow: 'all',
-      account: 'all',
-    });
-  };
-
   const submitTransfer = async (event) => {
     event.preventDefault();
     setSubmittingTransfer(true);
@@ -502,92 +426,6 @@ const TreasuryManagement = () => {
     }
   };
 
-  const renderMovementPurpose = (movement) => {
-    const primary = movement.reason_label || movement.reason || movement.description || '-';
-    const secondary = [
-      movement.description,
-      movement.reason_details,
-      movement.beneficiary_name ? `Bénéficiaire: ${movement.beneficiary_name}` : '',
-      movement.payment_method ? `Mode: ${formatPaymentMethodLabel(movement.payment_method)}` : '',
-    ]
-      .filter((value) => typeof value === 'string' && value.trim() !== '' && value.trim() !== primary)
-      .filter((value, index, array) => array.indexOf(value) === index);
-
-    return (
-      <div className="cash-movement-detail">
-        <strong>{primary}</strong>
-        {secondary.map((line) => (
-          <span key={line}>{line}</span>
-        ))}
-      </div>
-    );
-  };
-
-  const movementColumns = [
-    {
-      key: 'movement_type',
-      header: 'Flux',
-      sortAccessor: (movement) => movement.flow_type_label || MOVEMENT_TYPE_LABELS[movement.movement_type] || movement.movement_type || '-',
-      searchAccessor: (movement) => `${movement.flow_type_label || ''} ${MOVEMENT_TYPE_LABELS[movement.movement_type] || movement.movement_type || ''}`,
-      render: (movement) => (
-        <span className={`cash-movement-kind ${movement.movement_type || 'withdrawal'}`}>
-          {movement.flow_type_label || MOVEMENT_TYPE_LABELS[movement.movement_type] || movement.movement_type || '-'}
-        </span>
-      ),
-    },
-    {
-      key: 'amount',
-      header: 'Montant',
-      sortType: 'number',
-      sortAccessor: (movement) => Number(movement.amount || 0),
-      searchAccessor: (movement) => String(movement.amount || ''),
-      render: (movement) => formatCurrency(movement.amount),
-    },
-    {
-      key: 'source_account',
-      header: 'Depuis',
-      sortAccessor: (movement) => movement.source_account_label || '',
-      searchAccessor: (movement) => movement.source_account_label || '',
-      render: (movement) => movement.source_account_label || 'Externe',
-    },
-    {
-      key: 'destination_account',
-      header: 'Vers',
-      sortAccessor: (movement) => movement.destination_account_label || '',
-      searchAccessor: (movement) => movement.destination_account_label || '',
-      render: (movement) => movement.destination_account_label || 'Externe',
-    },
-    {
-      key: 'reason',
-      header: 'Motif / Description',
-      sortAccessor: (movement) => movement.reason_label || movement.reason || movement.description || '',
-      searchAccessor: (movement) => `${movement.reason_label || ''} ${movement.reason || ''} ${movement.description || ''} ${movement.reason_details || ''} ${movement.beneficiary_name || ''}`,
-      render: (movement) => renderMovementPurpose(movement),
-    },
-    {
-      key: 'status',
-      header: 'Statut',
-      sortAccessor: (movement) => STATUS_LABELS[movement.status] || movement.status || '',
-      searchAccessor: (movement) => `${STATUS_LABELS[movement.status] || movement.status || ''} ${movement.approved_by_name || ''}`,
-      render: (movement) => (
-        <>
-          <span className={`cash-movement-status ${movement.status || 'pending'}`}>
-            {STATUS_LABELS[movement.status] || movement.status || '-'}
-          </span>
-          {movement.approved_by_name ? <div className="form-hint">Par: {movement.approved_by_name}</div> : null}
-        </>
-      ),
-    },
-    {
-      key: 'effective_at',
-      header: 'Date effet',
-      sortType: 'date',
-      sortAccessor: (movement) => movement.effective_at || movement.created_at,
-      searchAccessor: (movement) => formatDateTime(movement.effective_at || movement.created_at),
-      render: (movement) => formatDateTime(movement.effective_at || movement.created_at),
-    },
-  ];
-
   if (loading) {
     return <div className="loading">Chargement de la trésorerie...</div>;
   }
@@ -605,6 +443,9 @@ const TreasuryManagement = () => {
             </button>
             <Link className="btn btn-secondary" to="/admin/cash-movements">
               Voir validations caisse
+            </Link>
+            <Link className="btn btn-secondary" to="/admin/histories?view=treasury">
+              Historiques
             </Link>
           </div>
         </div>
@@ -934,166 +775,6 @@ const TreasuryManagement = () => {
         )}
       </div>
 
-      <div className="card">
-        <div className="section-header-inline">
-          <h3 style={{ marginBottom: 0 }}>Historique de trésorerie</h3>
-          <button
-            type="button"
-            className={`btn btn-sm ${showMovementFilters ? 'btn-primary' : 'btn-secondary'} filter-toggle-inline`}
-            onClick={() => setShowMovementFilters((previous) => !previous)}
-          >
-            <span>{showMovementFilters ? 'Masquer filtres' : 'Afficher filtres'}</span>
-            {activeMovementFilterCount > 0 ? <strong>{activeMovementFilterCount}</strong> : null}
-          </button>
-        </div>
-        {showMovementFilters ? (
-          <div className="treasury-history-toolbar">
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Famille de flux</span>
-              <div className="treasury-filter-toggles">
-                {MOVEMENT_FLOW_FILTERS.map((option) => {
-                  const optionCount = option.value === 'all'
-                    ? movements.length
-                    : movements.filter((movement) => option.flowTypes.includes(String(movement.flow_type || ''))).length;
-
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`treasury-filter-toggle ${movementFilters.flow === option.value ? 'is-active' : ''}`}
-                      onClick={() => setMovementFilters((previous) => ({ ...previous, flow: option.value }))}
-                    >
-                      <span>{option.label}</span>
-                      <strong>{optionCount}</strong>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="treasury-filter-block">
-              <span className="treasury-filter-label">Compte concerné</span>
-              <div className="treasury-filter-toggles">
-                {movementAccountFilterOptions.map((option) => {
-                  const optionCount = option.value === 'all'
-                    ? movements.length
-                    : movements.filter((movement) => (
-                      String(movement.source_account || '') === option.value
-                      || String(movement.destination_account || '') === option.value
-                    )).length;
-
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`treasury-filter-toggle ${movementFilters.account === option.value ? 'is-active' : ''}`}
-                      onClick={() => setMovementFilters((previous) => ({ ...previous, account: option.value }))}
-                    >
-                      <span>{option.label}</span>
-                      <strong>{optionCount}</strong>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="treasury-history-summary">
-              <div className="supplier-ledger-active-pill">
-                <span>Résultat</span>
-                <strong>{filteredMovements.length} mouvement(s)</strong>
-              </div>
-              <div className="supplier-ledger-active-pill">
-                <span>Total visible</span>
-                <strong>{formatCurrency(filteredMovementAmount)}</strong>
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={resetMovementFilters}
-                disabled={movementFilters.flow === 'all' && movementFilters.account === 'all'}
-              >
-                Réinitialiser les filtres
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {movements.length === 0 ? (
-          <div className="alert-empty">Aucun mouvement de trésorerie.</div>
-        ) : (
-          <DataTable
-            columns={movementColumns}
-            data={filteredMovements}
-            rowKey="id"
-            searchPlaceholder="Rechercher un mouvement (compte, motif, type, statut)..."
-            initialSort={{ key: 'effective_at', direction: 'desc' }}
-            emptyMessage="Aucun mouvement ne correspond aux filtres sélectionnés."
-          />
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Paiements clients récents</h3>
-        {recentCustomerPayments.length === 0 ? (
-          <div className="alert-empty">Aucun paiement client récent.</div>
-        ) : (
-          <div className="table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Commande</th>
-                  <th>Client</th>
-                  <th>Table</th>
-                  <th>Statut</th>
-                  <th>Mode choisi</th>
-                  <th>Mode encaissé</th>
-                  <th>Compte alimenté</th>
-                  <th>Montant</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentCustomerPayments.map((payment) => (
-                  <tr key={payment.id}>
-                    <td data-label="Commande">#{payment.order_id}</td>
-                    <td data-label="Client">{payment.customer_name || 'Client libre'}</td>
-                    <td data-label="Table">{payment.order_type === 'takeaway' ? 'A emporter' : (payment.table_number ? `Table ${payment.table_number}` : 'Sans table')}</td>
-                    <td data-label="Statut">{STATUS_LABELS[payment.status] || payment.status || '-'}</td>
-                    <td data-label="Mode choisi">{formatPaymentMethodLabel(payment.method)}</td>
-                    <td data-label="Mode encaisse">{formatPaymentMethodLabel(payment.settlement_method || payment.method)}</td>
-                    <td data-label="Compte alimente">{payment.target_account_label || 'En attente'}</td>
-                    <td data-label="Montant">{formatCurrency(payment.amount)}</td>
-                    <td data-label="Date">{formatDateTime(payment.encashed_at || payment.printed_at || payment.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3 style={{ marginBottom: '10px' }}>Règles d&apos;alimentation des comptes</h3>
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Mode client</th>
-                <th>Compte alimenté</th>
-                <th>Règle</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(Array.isArray(config?.payment_account_rules) ? config.payment_account_rules : []).map((rule) => (
-                <tr key={rule.payment_method}>
-                  <td data-label="Mode client">{rule.payment_method_label}</td>
-                  <td data-label="Compte alimente">{rule.target_account_label || 'Aucun'}</td>
-                  <td data-label="Regle">{rule.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };

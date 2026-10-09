@@ -1,8 +1,9 @@
 .workspace-topbar { position: sticky; top: 0; z-index: 30; background: #fffdf8f5; backdrop-filter: blur(14px); border-bottom: 1px solid var(--line); padding: 12px 28px 0; }
 .workspace-topbar-identity { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding-bottom: 10px; }
-.workspace-brand { display: grid; gap: 5px; min-width: 0; }
-.workspace-brand span { color: var(--primary); text-transform: uppercase; letter-spacing: 0.15em; font-size: 0.65rem; font-weight: 800; }
-.workspace-brand strong { color: var(--text-main); font: 500 clamp(1.2rem, 2vw, 1.65rem) Georgia, serif; letter-spacing: -0.035em; }
+.workspace-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.workspace-brand-mark { display: block; flex: none; width: 68px; height: 68px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.workspace-brand-mark img { display: block; width: 68px; height: 68px; object-fit: contain; }
+.workspace-brand-section { color: var(--primary); text-transform: uppercase; letter-spacing: 0.15em; font-size: 0.72rem; font-weight: 800; }
 .workspace-account { display: flex; gap: 10px; align-items: center; }
 .workspace-user { font-size: 0.78rem; font-weight: 800; color: var(--text-soft); margin-right: 8px; }
 .workspace-account button { border: 1px solid var(--line); border-radius: 8px; padding: 10px 13px; min-height: 40px; background: transparent; color: var(--text-main); font: 700 0.72rem 'Manrope', sans-serif; cursor: pointer; }
@@ -32,6 +33,6 @@
   .workspace-subnav-link { padding: 9px 10px; font-size: 0.7rem; text-align: center; }
 }
 @media (max-width: 360px) {
-  .workspace-brand strong { font-size: 1.12rem; }
+  .workspace-brand-mark, .workspace-brand-mark img { width: 58px; height: 58px; }
   .workspace-user { margin-right: 0; }
 }

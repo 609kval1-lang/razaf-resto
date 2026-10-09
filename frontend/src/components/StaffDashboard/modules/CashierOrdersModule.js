@@ -9,6 +9,7 @@ import CashierOtherAdditions from './CashierOtherAdditions';
 import './CashierWorkspace.css';
 
 const EMPTY_DRAFT = { quantities: {}, notes: '' };
+const VISIBLE_TABLE_BATCH = 12;
 const formatCurrency = (value) => `${Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Ar`;
 const apiError = (error) => Object.values(error.response?.data?.errors || {}).flat().join(' ')
   || error.response?.data?.error || error.response?.data?.message || 'Connexion impossible. Votre brouillon est conserve. Reessayez.';
@@ -20,6 +21,7 @@ const CashierOrderEntry = ({ storageKey }) => {
   const [tableId, setTableId] = useState('');
   const [tableFilter, setTableFilter] = useState('all');
   const [tableSearch, setTableSearch] = useState('');
+  const [tableLimit, setTableLimit] = useState(VISIBLE_TABLE_BATCH);
   const [step, setStep] = useState('tables');
   const [orderId, setOrderId] = useState(null);
   const [drafts, setDrafts] = useState(() => readOrderDrafts(storageKey));
@@ -231,16 +233,16 @@ const CashierOrderEntry = ({ storageKey }) => {
             {[['all', 'Toutes les tables'], ['free', 'Tables libres'],
               ['occupied', 'Commandes en cours'], ['draft', 'Brouillons']]
               .map(([value, label]) => <button key={value} type="button" className={`cq-metric is-${value}`}
-                aria-pressed={tableFilter === value} onClick={() => setTableFilter(value)}>
+                aria-pressed={tableFilter === value} onClick={() => { setTableFilter(value); setTableLimit(VISIBLE_TABLE_BATCH); }}>
                 <span>{label}</span><strong>{tableCounts[value]}</strong>
               </button>)}
           </div>
           <div className="cq-filter-bar">
-            <label className="cq-search">Rechercher une table<input type="search" value={tableSearch} onChange={(event) => setTableSearch(event.target.value)} placeholder="Numero de table..." /></label>
+            <label className="cq-search">Rechercher une table<input type="search" value={tableSearch} onChange={(event) => { setTableSearch(event.target.value); setTableLimit(VISIBLE_TABLE_BATCH); }} placeholder="Numero de table..." /></label>
             <span className="cq-result-count">{visibleTables.length} / {tables.length} tables</span>
           </div>
           <div className="cq-table-grid">
-            {visibleTables.map((item) => {
+            {visibleTables.slice(0, tableLimit).map((item) => {
               const count = draftCount(item);
               const state = item.active_order_id ? 'occupied' : item.reservation_locked ? 'reserved' : count ? 'draft' : 'free';
               return <article className={`cq-table-card is-${state}`} key={item.id}>
@@ -264,6 +266,11 @@ const CashierOrderEntry = ({ storageKey }) => {
               </article>;
             })}
           </div>
+          {visibleTables.length > VISIBLE_TABLE_BATCH ? <div className="cq-list-progress">
+            <span>{Math.min(tableLimit, visibleTables.length)} sur {visibleTables.length} tables affichees</span>
+            {tableLimit < visibleTables.length ? <button type="button" className="cq-button" onClick={() => setTableLimit((limit) => limit + VISIBLE_TABLE_BATCH)}>Afficher 12 tables suivantes</button> : null}
+            {tableLimit > VISIBLE_TABLE_BATCH ? <button type="button" className="cq-button" onClick={() => setTableLimit(VISIBLE_TABLE_BATCH)}>Voir moins</button> : null}
+          </div> : null}
           {loading && !tables.length ? <p className="cq-empty" role="status">Chargement des tables...</p> : null}
           {!loading && !visibleTables.length && !error ? <div className="cq-empty"><h3>{tables.length ? 'Aucune table ne correspond aux filtres.' : 'Aucune table disponible.'}</h3>
             {tables.length ? <button type="button" className="cq-button" onClick={() => { setTableFilter('all'); setTableSearch(''); }}>Reinitialiser les filtres</button> : null}

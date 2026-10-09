@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\CashMovement;
+use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Models\RestaurantTable;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -12,6 +15,100 @@ use Tests\TestCase;
 class AdminTreasuryManagementTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_admin_movement_history_is_paginated_and_filters_without_changing_balances(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Sanctum::actingAs($admin);
+
+        for ($index = 0; $index < 22; $index++) {
+            CashMovement::query()->create([
+                'direction' => 'in',
+                'status' => 'approved',
+                'flow_type' => 'customer_payment',
+                'amount' => 100,
+                'destination_account' => CashMovement::ACCOUNT_CASH,
+                'description' => "Encaissement client {$index}",
+                'approved_at' => now()->subMinutes(22 - $index),
+            ]);
+        }
+
+        CashMovement::query()->create([
+            'direction' => 'out',
+            'status' => 'approved',
+            'flow_type' => 'supplier_payment',
+            'amount' => 500,
+            'source_account' => CashMovement::ACCOUNT_CASH,
+            'description' => 'Règlement fournisseur',
+            'approved_at' => now(),
+        ]);
+
+        $pageOne = $this->getJson('/api/admin/treasury/history?account=cash&page=1');
+        $pageOne->assertOk()->assertJsonPath('total', 23)->assertJsonCount(20, 'data');
+        $this->getJson('/api/admin/treasury/history?account=cash&page=2')
+            ->assertOk()->assertJsonCount(3, 'data');
+        $this->getJson('/api/admin/treasury/history?flow=customer&account=cash')
+            ->assertOk()->assertJsonPath('total', 22);
+        $this->getJson('/api/admin/treasury/history?flow=supplier&account=bank')
+            ->assertOk()->assertJsonPath('total', 0);
+        $this->getJson('/api/admin/treasury/history?search=fournisseur')
+            ->assertOk()->assertJsonPath('total', 1);
+        $this->getJson('/api/admin/treasury/history?account=invalid')->assertUnprocessable();
+
+        $this->getJson('/api/admin/treasury')
+            ->assertOk()->assertJsonPath('summary.accounts.cash.balance', 1700);
+    }
+
+    public function test_treasury_history_enriches_collected_customer_payment_without_duplicating_pending_payment(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Sanctum::actingAs($admin);
+
+        $customer = Customer::query()->create(['name' => 'Client trésorerie']);
+        $table = RestaurantTable::query()->create(['table_number' => 'T7', 'capacity' => 4, 'status' => 'free']);
+        $order = Order::query()->create([
+            'user_id' => $admin->id,
+            'table_id' => $table->id,
+            'customer_id' => $customer->id,
+            'total_amount' => 12000,
+            'status' => 'paid',
+            'is_urgent' => false,
+            'occupies_table' => false,
+        ]);
+        $payment = Payment::query()->create([
+            'order_id' => $order->id,
+            'amount' => 12000,
+            'method' => 'cash',
+            'status' => 'completed',
+            'reference' => 'REF-CLIENT',
+        ]);
+        $movement = CashMovement::query()->create([
+            'direction' => 'in',
+            'status' => 'approved',
+            'amount' => 12000,
+            'payment_method' => 'cash',
+            'destination_account' => CashMovement::ACCOUNT_CASH,
+            'order_id' => $order->id,
+            'payment_id' => $payment->id,
+            'approved_at' => now(),
+        ]);
+        Payment::query()->create([
+            'order_id' => $order->id,
+            'amount' => 3000,
+            'method' => 'bon',
+            'status' => 'pending',
+        ]);
+
+        $snapshot = $this->getJson('/api/admin/treasury');
+        $snapshot->assertOk()
+            ->assertJsonPath('summary.accounts.cash.balance', 12000)
+            ->assertJsonCount(1, 'movements')
+            ->assertJsonPath('movements.0.id', $movement->id)
+            ->assertJsonPath('movements.0.flow_type', 'customer_payment')
+            ->assertJsonPath('movements.0.customer_name', 'Client trésorerie')
+            ->assertJsonPath('movements.0.table_number', 'T7')
+            ->assertJsonPath('movements.0.payment_reference', 'REF-CLIENT');
+    }
 
     public function test_admin_transfer_and_withdrawal_update_treasury_balances(): void
     {
