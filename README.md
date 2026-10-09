@@ -1,303 +1,108 @@
-# 🏪 Razafimamonjy Restaurant - Guide d'Installation
-> Flux actif au 8 octobre 2026 : caisse unique, sans serveur, cuisine ni bar.
-> Voir [FLUX_CAISSE.md](FLUX_CAISSE.md) pour les regles actuelles.
-> Les descriptions du parcours precedent ci-dessous restent historiques.
-> Sur une base existante, ne pas relancer les seeders ou les anciennes migrations de nettoyage.
+# Razaf Resto
 
-## 📋 Prérequis
+Application de restaurant : API Laravel 12 et interface React. Le flux actif
+utilise les roles **admin** et **caissier**. La caisse gere les commandes,
+les encaissements et le stock ; l'administration gere notamment les menus,
+matieres premieres, fournisseurs, achats et finances.
 
-- XAMPP (Apache + PHP 8.1+)
-- Composer
-- Node.js & npm
-- MySQL 8.0+
+Les anciens modules serveur, cuisine et bar sont conserves dans
+[`archives/`](archives/) pour consultation uniquement. Ils ne sont pas charges
+par l'application active. Voir [`FLUX_CAISSE.md`](FLUX_CAISSE.md) pour les regles
+du nouveau parcours et [`backend/CALCULATION_AUDIT.md`](backend/CALCULATION_AUDIT.md)
+pour les calculs financiers et de stock.
 
-## 🚀 Configuration Backend (Laravel)
+## Installer sur une autre machine
 
-### 1️⃣ Préparation
-```bash
-cd c:\xampp\htdocs\razaf-resto\backend
+Prerequis : PHP **8.2+** avec les extensions demandees par Composer, Composer,
+Node.js et npm, MySQL/MariaDB et Git. XAMPP peut fournir PHP et MySQL. Le code
+Git ne contient ni les dependances installees, ni les fichiers `.env`, ni les
+donnees MySQL.
 
-# Copier le fichier .env
-copy .env.example .env
+Dans PowerShell, cloner le projet ou mettre a jour une copie existante. Ouvrir
+ensuite les terminaux suivants a la racine du clone :
 
-# Générer la clé APP
+```powershell
+git clone https://github.com/609kval1-lang/razaf-resto.git
+# Ou, dans une copie deja presente : git pull origin main
+```
+
+Installer et configurer l'API :
+
+```powershell
+cd .\backend
+Copy-Item .env.example .env
+composer install
 php artisan key:generate
 ```
 
-### 2️⃣ Configuration Base de Données (.env)
-```
-DB_DATABASE=razaf_resto
-DB_USERNAME=root
-DB_PASSWORD=
-```
+Dans `backend/.env`, verifier `DB_HOST`, `DB_PORT`, `DB_DATABASE`,
+`DB_USERNAME` et `DB_PASSWORD`. La valeur d'exemple `DB_DATABASE=razaf_resto`
+suppose que cette base existe deja dans MySQL. Creer la base vide avant les
+migrations si l'installation est neuve. Ne pas copier la cle `APP_KEY` d'une
+autre installation si aucune donnee chiffree ne doit etre reprise.
 
-### 3️⃣ Créer Base de Données
-```bash
-# Via MySQL
-mysql -u root
-CREATE DATABASE razaf_resto;
-EXIT;
-```
+**Base neuve de demonstration uniquement :**
 
-### 4️⃣ Migrations & Seed (base neuve uniquement)
-```bash
-# Exécuter les migrations sur une base neuve
+```powershell
 php artisan migrate
-
-# Peupler une base de test neuve seulement
 php artisan db:seed --class=RazafRestoSeeder
 ```
 
-Sur une base existante, sauvegarder les donnees et verifier d'abord les
-migrations en attente avec `php artisan migrate:status`. Ne pas relancer les
-seeders ni les anciennes migrations de nettoyage.
+Le seeder cree des utilisateurs et du stock fictifs. Le compte de demonstration
+est `admin@razaf.com` avec le mot de passe `admin123` : le changer avant tout
+usage reel. Ne jamais executer ce seeder sur une base contenant des donnees
+reelles, car il remet a jour des lignes existantes.
 
-### 5️⃣ Lancer le Serveur
-```bash
-php artisan serve
-# Backend API: http://localhost:8000/api
-```
+**Reprise d'une base existante :** faire une sauvegarde SQL sur l'ancienne
+machine, l'importer dans la base de la nouvelle machine, puis verifier
+`php artisan migrate:status`. Examiner les migrations en attente avant de lancer
+`php artisan migrate` : certaines anciennes migrations peuvent modifier des
+donnees. Ne pas executer `migrate:fresh`, `migrate:refresh` ou les seeders sur
+une base de production. Si des donnees chiffrees doivent etre relues, reprendre
+aussi l'ancienne `APP_KEY` dans le `.env` de la nouvelle machine.
 
-## 🎨 Configuration Frontend (React)
+Installer et lancer le frontend dans un second terminal :
 
-### 1️⃣ Préparation
-```bash
-cd c:\xampp\htdocs\razaf-resto\frontend
-
-# Installer les dépendances
-npm install
-```
-
-### 2️⃣ Variables d'Environnement (.env)
-Créer `.env` :
-```
-REACT_APP_API_URL=http://localhost:8000/api
-```
-
-### 3️⃣ Lancer le Frontend
-```bash
+```powershell
+cd .\frontend
+npm ci
 npm start
-# Frontend: http://localhost:3000
 ```
 
-## 👥 Utilisateurs de Test
+Lancer l'API dans le premier terminal depuis `backend` :
 
-### Après db:seed, vous pouvez vous connecter avec :
-
-```
-Email: admin@razaf.com
-Password: admin123
-Rôle: Admin
-
----
-
-Email: server@razaf.com
-Password: server123
-Rôle: Serveur
-
----
-
-Email: kitchen@razaf.com
-Password: kitchen123
-Rôle: Cuisine
-
----
-
-Email: cashier@razaf.com
-Password: cashier123
-Rôle: Caissier
+```powershell
+php artisan serve
 ```
 
-## 📊 Routes API Disponibles
+Ouvrir `http://localhost:3000`. L'API tourne par defaut sur
+`http://localhost:8000`. L'interface deduit automatiquement cette adresse ; un
+`frontend/.env` n'est normalement pas necessaire. Pour une adresse differente,
+creer ce fichier local avec `REACT_APP_API_URL=http://ADRESSE:PORT/api`, puis
+redemarrer le frontend. Ce fichier n'est pas versionne.
 
-### 🔓 Publiques (non authentifiées)
-```
-POST   /api/register
-POST   /api/login
-```
+Pour acceder depuis un autre appareil du reseau, demarrer l'API avec
+`php artisan serve --host=0.0.0.0`, rendre le frontend accessible sur le
+reseau, et ajouter son origine exacte (par exemple
+`http://192.168.1.10:3000`) a `CORS_ALLOWED_ORIGINS` dans `backend/.env`,
+separee des autres par une virgule. Redemarrer l'API apres modification ; si la
+configuration Laravel est en cache, executer `php artisan config:clear`.
+Ouvrir uniquement les ports necessaires dans le pare-feu et ne pas exposer les
+serveurs de developpement directement sur Internet.
 
-### 🔐 Protégées (authentifiées)
+## Verifier
 
-#### 👨‍💼 Admin (`/api/admin/*`)
-```
-GET    /admin/users                    - Lister utilisateurs
-POST   /admin/users                    - Créer utilisateur
-PUT    /admin/users/{user}             - Éditer utilisateur
-DELETE /admin/users/{user}             - Supprimer
+```powershell
+# Dans backend
+php artisan test
+php artisan route:list --path=api
 
-GET    /admin/tables                   - Lister tables
-POST   /admin/tables                   - Ajouter table
-PUT    /admin/tables/{table}           - Éditer table
-DELETE /admin/tables/{table}           - Supprimer table
-
-GET    /admin/raw-materials            - Stock brut
-POST   /admin/raw-materials            - Ajouter
-PUT    /admin/raw-materials/{id}       - Éditer
-
-GET    /admin/ingredients              - Portions frigo
-POST   /admin/ingredients              - Créer portion
-PUT    /admin/ingredients/{id}         - Éditer portion
-
-GET    /admin/menus                    - Lister menus
-POST   /admin/menus                    - Créer menu
-PUT    /admin/menus/{menu}             - Éditer menu
-DELETE /admin/menus/{menu}             - Supprimer menu
+# Dans frontend
+npm test -- --watchAll=false --runInBand
+npm run build
 ```
 
-#### 🍽️ Serveur (`/api/server/*`)
-```
-GET    /server/tables                  - Tables libres
-GET    /server/customers               - Clients fidèles
-GET    /server/menus                   - Menu avec portions
-POST   /server/orders                  - Créer commande
-GET    /server/my-orders               - Mes commandes
-```
-
-#### 🍳 Cuisine (`/api/kitchen/*`)
-```
-GET    /kitchen/ingredients            - État portions
-GET    /kitchen/orders                 - Commandes en attente
-POST   /kitchen/orders/{order}/start   - Marquer "En cours"
-POST   /kitchen/orders/{order}/ready   - Marquer "Prêt"
-GET    /kitchen/history                - Historique
-GET    /kitchen/stats                  - Statistiques
-```
-
-#### 💰 Caisse (`/api/cashier/*`)
-```
-GET    /cashier/orders                 - Commandes prêtes
-POST   /cashier/orders/{order}/payment - Traiter paiement
-GET    /cashier/stats                  - Statistiques jour
-GET    /cashier/invoice/{order}        - Facture
-GET    /cashier/history                - Historique paiements
-```
-
-## 🔍 Tester l'API avec Postman/Insomnia
-
-### 1️⃣ Login
-```
-POST http://localhost:8000/api/login
-Body (JSON):
-{
-  "email": "admin@razaf.com",
-  "password": "admin123"
-}
-```
-
-### 2️⃣ Ajouter Token
-- Dans les Headers de toutes les requêtes protégées :
-```
-Authorization: Bearer {token_reçu}
-```
-
-### 3️⃣ Essayer une route Admin
-```
-GET http://localhost:8000/api/admin/tables
-Headers: Authorization: Bearer {token}
-```
-
-## 💾 Sauvegarder/Restaurer Base de Données
-
-### Sauvegarder
-```bash
-mysqldump -u root razaf_resto > backuprazaf.sql
-```
-
-### Restaurer
-```bash
-mysql -u root razaf_resto < backup_razaf.sql
-```
-
-## 🐛 Dépannage
-
-### "SQLSTATE[HY000]: General error"
-```bash
-php artisan cache:clear
-php artisan config:clear
-php artisan migrate:status
-```
-
-Verifier aussi que MySQL est demarre et que les parametres `DB_*` du `.env`
-correspondent a la base utilisee. `migrate:refresh --seed` recree les tables
-et ne doit pas servir au depannage d'une base existante.
-
-### Problèmes d'authentification
-- Vérifier le `.env` DB_HOST=127.0.0.1 (pas localhost)
-- Vérifier sanctum middleware dans `bootstrap/app.php`
-
-### Erreur Port 8000 occupé
-```bash
-php artisan serve --port=8001
-```
-
-### Erreur NPM packages
-```bash
-cd frontend
-rm -r node_modules
-npm install
-```
-
-## 📱 Architectures des Composants
-
-### Hiérarchie des fichiers Suggestion:
-```
-razaf-resto/
-├── backend/                 (Laravel API)
-│   ├── app/
-│   │   ├── Http/Controllers/Api/
-│   │   │   ├── AdminController.php
-│   │   │   ├── ServerController.php
-│   │   │   ├── KitchenController.php
-│   │   │   └── CashierController.php
-│   │   ├── Models/
-│   │   │   ├── RawMaterial.php
-│   │   │   ├── Ingredient.php
-│   │   │   ├── Menu.php
-│   │   │   ├── Order.php
-│   │   │   ├── ...
-│   ├── database/
-│   │   ├── migrations/
-│   │   └── seeders/
-│   └── routes/api.php
-│
-├── frontend/                (React)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── AdminPanel/
-│   │   │   ├── ServerDashboard/
-│   │   │   ├── KitchenDashboard/
-│   │   │   └── CashierDashboard/
-│   │   ├── pages/
-│   │   ├── services/api.js
-│   │   └── App.js
-│
-└── ARCHITECTURE.md          (Cette doc)
-```
-
-## ✅ Checklist Démarrage
-
-- [x] Dossiers créés
-- [x] Backend Laravel initialisé
-- [x] Migrations créées
-- [x] Modèles définis
-- [x] Contrôleurs API créés
-- [x] Routes configurées
-- [x] Seeder préparé
-- [ ] Frontend React à initialiser
-- [ ] Composants React à créer
-- [ ] Tester les routes API
-- [ ] Intégration Frontend/Backend
-- [ ] Tests unitaires
-- [ ] Déploiement
-
-## 🎯 Prochaines Étapes
-
-1. **Frontend React** - Créer les 4 dashboards (Admin, Serveur, Cuisine, Caisse)
-2. **Tests unitaires** - Valider les routes API
-3. **Authentification** - Implémenter tokens JWT
-4. **Notifications** - WebSocket pour mises à jour en temps réel
-5. **Rapports** - Exports PDF/Excel
-
----
-
-Pour plus d'aide : consultez [ARCHITECTURE.md](./ARCHITECTURE.md)
+En cas d'echec au demarrage, verifier que MySQL est lance, que les parametres
+`DB_*` correspondent a la base, que `composer install` et `npm ci` ont termine,
+et que les ports 8000 et 3000 sont libres. Les archives ne doivent pas etre
+copiees dans `backend/app` ou `frontend/src` pour installer cette version.
